@@ -1,0 +1,16 @@
+/* Navbar styles */
+.topbar { background: linear-gradient(90deg, #003366, #0059b3); color: #fff; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; position: fixed; top: 0; left: 0; right: 0; z-index: 1000; box-shadow: 0 3px 10px rgba(0,0,0,0.2); font-family: Poppins, sans-serif; }
+.menu-button { font-size: 28px; cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: background-color .25s ease; user-select: none; }
+.menu-button:hover { background-color: rgba(255,255,255,0.18); }
+.brand-title { position: absolute; left: 50%; transform: translateX(-50%); font-size: 1.6rem; font-weight: 700; letter-spacing: 1.5px; user-select: none; }
+
+.nav-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.25); z-index: 1100; }
+.sidebar { position: fixed; top: 0; left: 0; height: 100vh; width: 290px; background: #fff; padding: 80px 18px 18px; box-shadow: 4px 0 20px rgba(0,0,0,0.12); transform: translateX(-100%); transition: transform .35s ease-in-out; z-index: 1200; display: flex; flex-direction: column; border-top-right-radius: 20px; border-bottom-right-radius: 20px; }
+.sidebar.visible { transform: translateX(0); }
+.nav-link { background: #f5f7fa; color: #003366; padding: 14px 16px; margin: 6px 0; border-radius: 14px; font-size: 1.05rem; font-weight: 600; text-decoration: none; display: flex; align-items: center; gap: 10px; box-shadow: 0 2px 6px rgba(0,51,102,0.12); transition: background .2s ease, color .2s ease, box-shadow .2s ease, transform .2s ease; }
+.nav-link:hover { background: #0059b3; color: #fff; box-shadow: 0 6px 16px rgba(0,89,179,0.35); transform: translateX(2px); }
+.nav-link.active { background: #004080; color: #fff; box-shadow: inset 4px 0 0 #00264d, 0 4px 12px rgba(0,64,128,0.35); }
+.logout-button { background: #d9534f; color: #fff; border: none; border-radius: 14px; padding: 14px 16px; font-weight: 700; cursor: pointer; margin-top: 10px; box-shadow: 0 2px 6px rgba(217,83,79,0.25); transition: filter .15s ease, transform .2s ease; }
+.logout-button:hover { filter: brightness(0.95); transform: translateX(2px); }
+
+@media (max-width: 640px) { .brand-title { font-size: 1.2rem; } .sidebar { width: 85vw; } }

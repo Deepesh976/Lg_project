@@ -1,0 +1,63 @@
+/* Shared admin UI styles */
+.page-shell { padding: 20px; font-family: Poppins, sans-serif; background-color: #f9f9f9; min-height: 100vh; }
+.container-narrow { max-width: 1300px; margin: 0 auto; }
+.section-title { font-size: 2rem; color: #003366; margin: 0 0 1rem; text-align: center; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.search-input { padding: 8px 12px; font-size: 14px; width: 220px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
+.alert { margin-bottom: 1rem; font-weight: 600; background: #fff; padding: 10px 15px; border-radius: 6px; box-shadow: 0 0 6px rgba(0,0,0,0.05); }
+.alert.success { color: green; }
+.alert.error { color: red; }
+
+/* Cards */
+.card { background-color: #fff; border-radius: 12px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+
+/* Tables */
+.table-wrap { background: #fff; border-radius: 12px; padding: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.08); overflow: hidden; }
+.table-scroll { max-height: 60vh; overflow-y: auto; overflow-x: auto; }
+.table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 700px; font-size: 14px; }
+.table thead th { position: sticky; top: 0; background-color: #f2f5fb; padding: 12px; border-bottom: 2px solid #cfd8e3; font-weight: 700; text-align: center; color: #003366; z-index: 1; }
+.table tbody td { padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; }
+.table tbody tr:nth-child(even) { background: #fafbfe; }
+.table tbody tr:hover { background: #f0f4ff; }
+
+/* Buttons */
+.btn { padding: 8px 12px; border: none; border-radius: 8px; cursor: pointer; color: #fff; transition: transform .08s ease, filter .15s ease; font-weight: 600; }
+.btn:hover { filter: brightness(0.95); }
+.btn:active { transform: translateY(1px); }
+.btn-primary { background-color: #007bff; }
+.btn-danger { background-color: #dc3545; }
+.btn-success { background-color: #28a745; }
+.btn-secondary { background-color: #6c757d; color: #fff; }
+.btn-outline { background: #fff; color: #333; border: 1px solid #cfd8e3; }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Forms */
+.inline-form { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; align-items: center; }
+.input { padding: 10px; border-radius: 6px; border: 1px solid #cfd8e3; flex: 1; min-width: 150px; background: #fff; }
+
+/* Grid */
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+
+/* Misc */
+.empty-row { text-align: center; padding: 1rem; color: #999; }
+.gradient-card { border-radius: 16px; color: #fff; padding: 2rem; text-align: center; background: linear-gradient(90deg, #3f51b5 0%, #5a55ae 50%, #8f94fb 100%); box-shadow: 0 10px 25px rgba(63,81,181,0.2); display: flex; flex-direction: column; justify-content: center; }
+.sticky-header { position: sticky; top: 0; z-index: 5; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; }
+.select-control { width: 280px; }
+.chart { height: 300px; }
+.pagination { display: flex; justify-content: center; align-items: center; margin-top: 20px; gap: 1rem; font-size: 14px; }
+.card-title { font-size: 1.1rem; margin-bottom: 12px; color: #555; }
+.mt-16 { margin-top: 16px; }
+.mr-8 { margin-right: 8px; }
+.actions { display: flex; justify-content: center; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Status badges */
+.status-badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .2px; }
+.status-online { background: rgba(40,167,69,0.12); color: #1e7e34; border: 1px solid rgba(40,167,69,0.35); }
+.status-offline { background: rgba(220,53,69,0.12); color: #a71d2a; border: 1px solid rgba(220,53,69,0.35); }
+.status-neutral { background: rgba(0,123,255,0.12); color: #0056b3; border: 1px solid rgba(0,123,255,0.35); }
+
+@media (max-width: 768px) {
+  .grid-2 { grid-template-columns: 1fr; }
+  .search-input, .select-control { width: 100%; }
+  .table { min-width: 620px; }
+}
