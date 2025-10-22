@@ -1,71 +1,34 @@
+// models/Rfid.js
 const mongoose = require('mongoose');
 
-const userSchema = new mongoose.Schema({
-  rfid_serial_no: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true
-  },
-  rfid_uid: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true
-  },
-  user_name: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  address: {
-    type: String,
-    required: true
-  },
-  village: {
-    type: String,
-    required: true
-  },
-  aadhar_no: {
-    type: Number,
-    required: true,
-    unique: true
-  },
-  mobile_no: {
-    type: Number,
-    required: true
-  },
-  family_mems: {
-    type: Number,
-    default: 1
-  },
-  quant_water_alloted_per_day: {
-    type: Number,
-    default: 0
-  },
-  quant_water_alloted_per_month: {
-    type: Number,
-    default: 0
-  },
-  swipe_count: {
-    type: Number,
-    default: 0
-  },
-  quant_water_used_in_month: {
-    type: Number,
-    default: 0
-  },
+const RfidSchema = new mongoose.Schema(
+  {
+    // RFID info (optional during onboarding)
+    rfid_serial_no: { type: String, required: true, trim: true, default: '' },
+    rfid_uid: { type: String, required: true, trim: true, default: '' },
 
-  // ✅ New field added here
-  allotment: {
-    type: String,
-    default: ''
+    // Personal info
+    user_name: { type: String, required: true, trim: true },
+    address: { type: String, default: '', trim: true },
+    village: { type: String, default: '', trim: true },
+    aadhar_no: { type: String, default: '', trim: true },
+    mobile_no: { type: String, required: true, trim: true },
+
+    // Allocation & usage
+    family_mems: { type: Number, default: 1, min: 0 },
+    quant_water_alloted_per_day: { type: Number, default: 0, min: 0 },
+    quant_water_alloted_per_month: { type: Number, default: 0, min: 0 },
+    swipe_count: { type: Number, default: 0, min: 0 },
+    total_litres_consumed: { type: Number, default: 0, min: 0 },
+
+    // Remaining card balance
+    remaining_card_balance: { type: Number, default: 0, min: 0 },
+
+    // Extras
+    remarks: { type: String, default: '', trim: true }
   },
+  { timestamps: true }
+);
 
-  remarks: {
-    type: String,
-    default: ''
-  }
-}, { timestamps: true });
-
-module.exports = mongoose.model('User', userSchema);
+// Export model named "Rfid" and use collection "rfids"
+module.exports = mongoose.models.Rfid || mongoose.model('Rfid', RfidSchema, 'rfids');

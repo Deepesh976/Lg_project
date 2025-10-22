@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+// src/pages/rfidcard.js
+import React, { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
@@ -24,22 +25,23 @@ function RfidCard() {
       boxShadow: "0 6px 18px rgba(20,30,60,0.06)",
       marginTop: 18,
     },
-    headerRow: {
+    header: {
       display: "flex",
       alignItems: "center",
       gap: 12,
       marginBottom: 18,
       flexWrap: "wrap",
     },
+    headerLeft: { display: "flex", gap: 8, alignItems: "center", flex: 1 },
+    headerCenter: { display: "flex", justifyContent: "center", flex: 1 },
+    headerRight: { display: "flex", justifyContent: "flex-end", gap: 8, flex: 1 },
     title: {
-      flex: 1,
-      textAlign: "center",
       fontSize: 22,
       fontWeight: 700,
       color: "#1f2937",
       margin: 0,
+      letterSpacing: 0.3,
     },
-    leftControls: { display: "flex", gap: 8, alignItems: "center" },
     searchBox: {
       padding: "8px 12px",
       borderRadius: 8,
@@ -56,6 +58,7 @@ function RfidCard() {
       borderRadius: 8,
       cursor: "pointer",
       fontWeight: 600,
+      opacity: 1,
     },
     tableWrap: {
       overflowX: "auto",
@@ -65,7 +68,7 @@ function RfidCard() {
     table: {
       width: "100%",
       borderCollapse: "collapse",
-      minWidth: 1300,
+      minWidth: 1400,
     },
     thead: { background: "#0b74ff", color: "#fff" },
     th: {
@@ -74,7 +77,9 @@ function RfidCard() {
       fontWeight: 800,
       fontSize: 14,
       borderRight: "1px solid rgba(255,255,255,0.12)",
-      whiteSpace: "nowrap",
+      whiteSpace: "normal", // allow wrapping
+      overflowWrap: "break-word",
+      wordBreak: "break-word",
     },
     td: {
       padding: "12px 10px",
@@ -82,7 +87,9 @@ function RfidCard() {
       color: "#111827",
       fontSize: 14,
       borderBottom: "1px solid #f1f5f9",
-      whiteSpace: "nowrap",
+      whiteSpace: "normal", // allow wrapping
+      overflowWrap: "break-word",
+      wordBreak: "break-word",
     },
     rowEven: { background: "#fff" },
     rowOdd: { background: "#fbfdff" },
@@ -111,41 +118,76 @@ function RfidCard() {
       color: "#6b7280",
       fontStyle: "italic",
     },
+    disabledBtn: {
+      opacity: 0.6,
+      cursor: "not-allowed",
+    },
   };
 
-  useEffect(() => {
-    fetchRecords();
-  }, []);
+  const columns = [
+    "S.No",
+    "RFID Serial No",
+    "RFID UID",
+    "User Name",
+    "Address",
+    "Village",
+    "Aadhar No",
+    "Mobile No",
+    "Family Members",
+    "Water/Day (L)",
+    "Water/Month (L)",
+    "No of Times Visited",
+    "Total Litres Consumed (L)",
+    "Remaining Card Balance",
+    "Remarks",
+    "Action",
+  ];
 
-  const fetchRecords = async () => {
+  const fetchRecords = useCallback(async () => {
     try {
       setLoading(true);
       const res = await axios.get("/api/rfid");
-      const data = Array.isArray(res.data) ? res.data : [];
+
+      let data = [];
+      if (Array.isArray(res.data)) data = res.data;
+      else if (Array.isArray(res.data.items)) data = res.data.items;
+      else if (Array.isArray(res.data.data)) data = res.data.data;
+      else if (Array.isArray(res.data.records)) data = res.data.records;
+      else if (res.data && typeof res.data === "object") {
+        const arr = Object.values(res.data).find((v) => Array.isArray(v));
+        data = arr || [];
+      }
+
       setRecords(data);
       setFilteredRecords(data);
     } catch (err) {
       console.error("Fetch Error:", err);
+      alert("Failed to load RFID records. See console for details.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchRecords();
+  }, [fetchRecords]);
 
   const handleSearch = (e) => {
-    const q = e.target.value.toLowerCase();
+    const q = (e.target.value || "").toLowerCase();
     setSearchQuery(q);
     if (!q) {
       setFilteredRecords(records);
       return;
     }
-    const filtered = records.filter(
-      (r) =>
-        r.user_name?.toLowerCase().includes(q) ||
-        r.mobile_no?.toString().includes(q) ||
-        r.village?.toLowerCase().includes(q) ||
-        r.rfid_uid?.toLowerCase().includes(q) ||
-        r.rfid_serial_no?.toLowerCase().includes(q)
-    );
+    const filtered = records.filter((r) => {
+      return (
+        (r.user_name || "").toString().toLowerCase().includes(q) ||
+        (r.mobile_no || "").toString().toLowerCase().includes(q) ||
+        (r.village || "").toString().toLowerCase().includes(q) ||
+        (r.rfid_uid || "").toString().toLowerCase().includes(q) ||
+        (r.rfid_serial_no || "").toString().toLowerCase().includes(q)
+      );
+    });
     setFilteredRecords(filtered);
   };
 
@@ -170,16 +212,21 @@ function RfidCard() {
   };
 
   const handleViewHistory = (rec) => {
-    navigate(`/rfidhistory/${rec._id}`, { state: rec });
+    // prefer rfid_uid (non-empty) otherwise fallback to _id
+    const uid =
+      rec && rec.rfid_uid && String(rec.rfid_uid).trim() !== ""
+        ? rec.rfid_uid
+        : rec._id;
+    navigate(`/rfidhistory/${encodeURIComponent(uid)}`, { state: { record: rec } });
   };
 
   const handleDownload = () => {
-    if (filteredRecords.length === 0) {
+    if (!filteredRecords || filteredRecords.length === 0) {
       alert("No records to download!");
       return;
     }
 
-    const headers = [
+    const csvHeaders = [
       "S.No",
       "RFID Serial No",
       "RFID UID",
@@ -191,12 +238,12 @@ function RfidCard() {
       "Family Members",
       "Water/Day (L)",
       "Water/Month (L)",
-      "Swipe Count",
-      "Used (L)",
-      "Allotment",
+      "No of Times Visited",
+      "Total Litres Consumed (L)",
+      "Remaining Card Balance",
       "Remarks",
     ];
-    const csvRows = [headers.join(",")];
+    const csvRows = [csvHeaders.join(",")];
 
     filteredRecords.forEach((r, i) => {
       const row = [
@@ -212,8 +259,8 @@ function RfidCard() {
         r.quant_water_alloted_per_day ?? "",
         r.quant_water_alloted_per_month ?? "",
         r.swipe_count ?? "",
-        r.quant_water_used_in_month ?? "",
-        `"${(r.allotment || "").replace(/"/g, '""')}"`,
+        r.total_litres_consumed ?? "",
+        r.remaining_card_balance ?? "",
         `"${(r.remarks || "").replace(/"/g, '""')}"`,
       ];
       csvRows.push(row.join(","));
@@ -232,45 +279,40 @@ function RfidCard() {
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.card}>
-          <div style={styles.headerRow}>
-            <div style={styles.leftControls}>
+          {/* header with search (left), title (center), download (right) */}
+          <div style={styles.header}>
+            <div style={styles.headerLeft}>
               <input
                 placeholder="🔍 Search by name, mobile, village, RFID UID or Serial No..."
                 value={searchQuery}
                 onChange={handleSearch}
                 style={styles.searchBox}
               />
-              <button style={styles.downloadBtn} onClick={handleDownload}>
+            </div>
+
+            <div style={styles.headerCenter}>
+              <h2 style={styles.title}>Registered RFID Users</h2>
+            </div>
+
+            <div style={styles.headerRight}>
+              <button
+                style={{
+                  ...styles.downloadBtn,
+                  ...(loading ? styles.disabledBtn : {}),
+                }}
+                onClick={handleDownload}
+                disabled={loading}
+              >
                 ⬇️ Download CSV
               </button>
             </div>
-
-            <h2 style={styles.title}>Registered RFID Users</h2>
-            <div style={{ width: 120 }} />
           </div>
 
           <div style={styles.tableWrap}>
             <table style={styles.table}>
               <thead style={styles.thead}>
                 <tr>
-                  {[
-                    "S.No",
-                    "RFID Serial No",
-                    "RFID UID",
-                    "User Name",
-                    "Address",
-                    "Village",
-                    "Aadhar No",
-                    "Mobile No",
-                    "Family Members",
-                    "Water/Day (L)",
-                    "Water/Month (L)",
-                    "Swipe Count",
-                    "Used (L)",
-                    "Allotment",
-                    "Remarks",
-                    "Action",
-                  ].map((h) => (
+                  {columns.map((h) => (
                     <th key={h} style={styles.th}>
                       {h}
                     </th>
@@ -279,9 +321,9 @@ function RfidCard() {
               </thead>
 
               <tbody>
-                {filteredRecords.length === 0 ? (
+                {!filteredRecords || filteredRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={16} style={styles.emptyRow}>
+                    <td colSpan={columns.length} style={styles.emptyRow}>
                       {loading ? "Loading records..." : "No records found"}
                     </td>
                   </tr>
@@ -289,13 +331,14 @@ function RfidCard() {
                   filteredRecords.map((r, i) => {
                     const rowStyle = i % 2 === 0 ? styles.rowEven : styles.rowOdd;
                     return (
-                      <tr key={r._id} style={rowStyle}>
+                      <tr key={r._id || i} style={rowStyle}>
                         <td style={styles.td}>{i + 1}</td>
                         <td style={styles.td}>{r.rfid_serial_no || "—"}</td>
                         <td style={styles.td}>
                           <button
                             onClick={() => handleViewHistory(r)}
                             style={styles.clickableRfid}
+                            title="View history for this RFID UID"
                           >
                             {r.rfid_uid || "—"}
                           </button>
@@ -309,19 +352,29 @@ function RfidCard() {
                         <td style={styles.td}>{r.quant_water_alloted_per_day ?? "—"}</td>
                         <td style={styles.td}>{r.quant_water_alloted_per_month ?? "—"}</td>
                         <td style={styles.td}>{r.swipe_count ?? "—"}</td>
-                        <td style={styles.td}>{r.quant_water_used_in_month ?? "—"}</td>
-                        <td style={styles.td}>{r.allotment || "—"}</td>
+                        <td style={styles.td}>{r.total_litres_consumed ?? "—"}</td>
+                        <td style={styles.td}>{r.remaining_card_balance ?? "—"}</td>
                         <td style={styles.td}>{r.remarks || "—"}</td>
                         <td style={styles.td}>
                           <button
-                            style={{ ...styles.actionBtn, ...styles.editBtn }}
+                            style={{
+                              ...styles.actionBtn,
+                              ...styles.editBtn,
+                              ...(loading ? styles.disabledBtn : {}),
+                            }}
                             onClick={() => handleEditNavigate(r)}
+                            disabled={loading}
                           >
                             Edit
                           </button>
                           <button
-                            style={{ ...styles.actionBtn, ...styles.delBtn }}
+                            style={{
+                              ...styles.actionBtn,
+                              ...styles.delBtn,
+                              ...(loading ? styles.disabledBtn : {}),
+                            }}
                             onClick={() => handleDelete(r._id)}
+                            disabled={loading}
                           >
                             Delete
                           </button>

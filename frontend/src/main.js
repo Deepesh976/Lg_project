@@ -9,9 +9,10 @@ import DeviceAnalysis from './pages/deviceAnalysis';
 import RfidCard from './pages/rfidcard';
 import EditRfidCard from './pages/editrfidcard';
 import RfidHistory from './pages/rfidhistory';
-import Devices from './pages/devices';
-import AddDevice from './pages/addDevice'; // <- corrected path/casing
-import Users from './pages/users';
+import Device from './pages/device';
+import AddDevice from './pages/addDevice';
+import EditDevice from './pages/editDevice';
+import User from './pages/user';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
 axios.defaults.baseURL = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
@@ -35,7 +36,10 @@ export default function App() {
         referrerPolicy="no-referrer"
       />
       <Routes>
+        {/* Authentication */}
         <Route path="/" element={<Login />} />
+
+        {/* Pages with Navbar */}
         <Route path="/deviceAnalysis" element={<WithNavbar Component={DeviceAnalysis} />} />
         <Route path="/rfidcard" element={<WithNavbar Component={RfidCard} />} />
 
@@ -43,14 +47,20 @@ export default function App() {
         <Route path="/rfidhistory/:id" element={<WithNavbar Component={RfidHistory} />} />
         <Route path="/rfidhistory" element={<Navigate to="/rfidcard" replace />} />
 
-        {/* Edit routes */}
+        {/* Edit RFID routes */}
         <Route path="/editrfid/:id" element={<WithNavbar Component={EditRfidCard} />} />
         <Route path="/editrfidcard/:id" element={<WithNavbar Component={EditRfidCard} />} />
         <Route path="/editrfidcard" element={<Navigate to="/rfidcard" replace />} />
 
-        <Route path="/devices" element={<WithNavbar Component={Devices} />} />
-        <Route path="/users" element={<WithNavbar Component={Users} />} />
-        <Route path="/adddevice" element={<WithNavbar Component={AddDevice} />} />
+        {/* Device CRUD routes (normalized) */}
+        <Route path="/device" element={<WithNavbar Component={Device} />} />
+        <Route path="/addDevice" element={<WithNavbar Component={AddDevice} />} />
+        {/* redirect bare /editdevice to list to avoid 404 when no id provided */}
+        <Route path="/editdevice" element={<Navigate to="/devices" replace />} />
+        <Route path="/editdevice/:id" element={<WithNavbar Component={EditDevice} />} />
+
+        {/* User */}
+        <Route path="/user" element={<WithNavbar Component={User} />} />
 
         {/* Catch-all 404 */}
         <Route path="*" element={<div style={{ padding: 20 }}>Page not found</div>} />

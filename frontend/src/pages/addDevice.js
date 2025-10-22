@@ -44,6 +44,14 @@ const styles = {
     fontSize: 14,
     outline: 'none',
   },
+  select: {
+    padding: '10px 12px',
+    borderRadius: 8,
+    border: '1px solid #d1d5db',
+    fontSize: 14,
+    outline: 'none',
+    background: '#fff',
+  },
   actions: {
     marginTop: 20,
     display: 'flex',
@@ -74,53 +82,78 @@ const styles = {
     fontSize: 12,
     color: '#6b7280',
     marginTop: 4,
-  }
+  },
 };
 
 export default function AddDevice() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
     device_id: '',
+    price_per_ltr: '',
+    total_dispensed_litres: '',
     location: '',
-    price_per_litre: ''
+    status: 'ACTIVE',
   });
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm(prev => ({ ...prev, [name]: value }));
+    setForm((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleReset = () => {
-    setForm({ device_id: '', location: '', price_per_litre: '' });
+    setForm({
+      device_id: '',
+      price_per_ltr: '',
+      total_dispensed_litres: '',
+      location: '',
+      status: 'ACTIVE',
+    });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Basic validation
-    if (!form.device_id.trim()) {
-      alert('Device Id is required.');
+    // Validation
+    const deviceId = (form.device_id || '').trim();
+    if (!deviceId) {
+      alert('Device ID is required.');
       return;
     }
-    if (form.price_per_litre === '' || isNaN(Number(form.price_per_litre))) {
+
+    if (form.price_per_ltr === '' || isNaN(Number(form.price_per_ltr))) {
       alert('Price per litre is required and must be a number.');
       return;
     }
 
+    if (form.total_dispensed_litres !== '' && isNaN(Number(form.total_dispensed_litres))) {
+      alert('Total dispensed litres must be a number.');
+      return;
+    }
+
+    const payload = {
+      device_id: deviceId,
+      price_per_ltr: Number(form.price_per_ltr),
+      total_dispensed_litres: form.total_dispensed_litres === '' ? 0 : Number(form.total_dispensed_litres),
+      location: (form.location || 'Unknown').trim() || 'Unknown',
+      status: (form.status || 'ACTIVE').toUpperCase(),
+    };
+
     try {
       setLoading(true);
-      const payload = {
-        device_id: form.device_id.trim(),
-        location: form.location.trim() || 'Unknown',
-        price_per_litre: Number(form.price_per_litre)
-      };
+      await axios.post('/api/device', payload);
 
-      const res = await axios.post('/api/devices', payload);
       // success
-      alert('Device added successfully.');
-      // navigate back to devices list (adjust route if needed)
-      navigate('/devices');
+      setForm({
+        device_id: '',
+        price_per_ltr: '',
+        total_dispensed_litres: '',
+        location: '',
+        status: 'ACTIVE',
+      });
+      alert('✅ Device added successfully!');
+      // navigate back to list and signal refresh
+      navigate('/device', { state: { refresh: true } });
     } catch (err) {
       console.error('Add device error:', err);
       const msg = err?.response?.data?.message || 'Failed to add device';
@@ -137,13 +170,13 @@ export default function AddDevice() {
 
         <form onSubmit={handleSubmit}>
           <div style={styles.formGroup}>
-            <label style={styles.label}>Device Id *</label>
+            <label style={styles.label}>Device ID *</label>
             <input
               name="device_id"
               value={form.device_id}
               onChange={handleChange}
               style={styles.input}
-              placeholder="Enter unique device id (eg. DEV-001)"
+              placeholder="Enter unique device ID (e.g., 105833)"
               autoFocus
             />
             <div style={styles.hint}>Unique identifier for the device (serial or tag).</div>
@@ -156,7 +189,7 @@ export default function AddDevice() {
               value={form.location}
               onChange={handleChange}
               style={styles.input}
-              placeholder="Enter device location (eg. Pump House A)"
+              placeholder="Enter device location (e.g., Vishakapatnam)"
             />
             <div style={styles.hint}>Optional. Defaults to "Unknown" if left empty.</div>
           </div>
@@ -164,8 +197,8 @@ export default function AddDevice() {
           <div style={styles.formGroup}>
             <label style={styles.label}>Price per litre *</label>
             <input
-              name="price_per_litre"
-              value={form.price_per_litre}
+              name="price_per_ltr"
+              value={form.price_per_ltr}
               onChange={handleChange}
               style={styles.input}
               placeholder="Enter price (number)"
@@ -173,14 +206,49 @@ export default function AddDevice() {
               step="0.01"
               min="0"
             />
-            <div style={styles.hint}>Numeric value. Example: 0.75</div>
+            <div style={styles.hint}>Numeric value. Example: 1</div>
+          </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Total dispensed litres</label>
+            <input
+              name="total_dispensed_litres"
+              value={form.total_dispensed_litres}
+              onChange={handleChange}
+              style={styles.input}
+              placeholder="Enter total dispensed litres (default 0)"
+              type="number"
+              step="0.01"
+              min="0"
+            />
+            <div style={styles.hint}>Optional. Defaults to 0.</div>
+          </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Status</label>
+            <select
+              name="status"
+              value={form.status}
+              onChange={handleChange}
+              style={styles.select}
+            >
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="INACTIVE">INACTIVE</option>
+              <option value="MAINTENANCE">MAINTENANCE</option>
+            </select>
+            <div style={styles.hint}>Device operational status.</div>
           </div>
 
           <div style={styles.actions}>
             <button style={styles.submitBtn} type="submit" disabled={loading}>
               {loading ? 'Saving...' : 'Add Device'}
             </button>
-            <button type="button" style={styles.resetBtn} onClick={handleReset} disabled={loading}>
+            <button
+              type="button"
+              style={styles.resetBtn}
+              onClick={handleReset}
+              disabled={loading}
+            >
               Reset
             </button>
           </div>

@@ -1,94 +1,113 @@
-// src/pages/rfidHistory.js
 import React, { useEffect, useState } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 
+/**
+ * RFID History (proxy-based)
+ * - Reads device response like:
+ *   { response: [ { "Device Id": "...", "RFID_UID": "...", "Remaining Card Balance": 64, "Date": "...", "Time": "...", "Litres Consumed": 15, "Amount Debited": 30, "Price Per Litre": 2 }, ... ] }
+ * - No raw inspector, no edit/delete actions.
+ */
+
 export default function RfidHistory() {
-  const { id } = useParams();
-  const { state } = useLocation();
+  const { id } = useParams(); // RFID UID
   const navigate = useNavigate();
 
-  const [meta, setMeta] = useState({
-    rfid_serial_no: state?.rfid_serial_no || "",
-    rfid_uid: state?.rfid_uid || "",
-    user_name: state?.user_name || "",
-    address: state?.address || "",
-    village: state?.village || "",
-    aadhar_no: state?.aadhar_no || "",
-    mobile_no: state?.mobile_no || "",
-    family_mems: state?.family_mems ?? "",
-    quant_water_alloted_per_day: state?.quant_water_alloted_per_day ?? "",
-    quant_water_alloted_per_month: state?.quant_water_alloted_per_month ?? "",
-    swipe_count: state?.swipe_count ?? "",
-    remarks: state?.remarks || "",
-  });
-  const [history, setHistory] = useState([]); // array of swipe entries
-  const [count, setCount] = useState(0);
+  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchHistory();
+    if (id) fetchViaProxy(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const fetchHistory = async () => {
+  const fetchViaProxy = async (uid) => {
+    setLoading(true);
+    setError("");
+    setHistory([]);
     try {
-      setLoading(true);
-      setError("");
-      const res = await axios.get(`/api/rfid/${id}/history`);
-      if (res?.data) {
-        setCount(res.data.count ?? (res.data.history?.length ?? 0));
-        setHistory(res.data.history ?? []);
-        if (res.data.meta) {
-          setMeta((prev) => ({ ...prev, ...res.data.meta }));
-        }
-      } else {
-        setCount(0);
-        setHistory([]);
+      const url = `/api/proxy/atw/${encodeURIComponent(uid)}`;
+      const res = await axios.get(url, { timeout: 15000 });
+      const data = res?.data ?? {};
+
+      // Handle { response: [...] } or direct arrays
+      let records = [];
+      if (Array.isArray(data.response)) records = data.response;
+      else if (Array.isArray(data)) records = data;
+      else if (Array.isArray(data.data)) records = data.data;
+      else if (Array.isArray(data.items)) records = data.items;
+      else if (data && typeof data === "object") {
+        const arr = Object.values(data).find((v) => Array.isArray(v));
+        records = arr || [];
       }
+
+      setHistory(records);
+      if (records.length === 0)
+        setError("No data found for this RFID UID (proxy returned empty).");
     } catch (err) {
-      console.error("fetchHistory error:", err);
-      setError(err.response?.data?.message || "Failed to fetch history.");
-      setCount(0);
-      setHistory([]);
+      console.error("fetchViaProxy error:", err);
+      if (err.response)
+        setError(
+          `Proxy/Device returned ${err.response.status}: ${JSON.stringify(
+            err.response.data
+          )}`
+        );
+      else if (err.request)
+        setError("No response from proxy. Ensure backend can reach the device.");
+      else setError(err.message || "Unknown error from proxy fetch.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteHistory = async (historyId) => {
-    if (!window.confirm("Are you sure you want to delete this history entry?")) return;
-    try {
-      await axios.delete(`/api/rfid/${id}/history/${historyId}`);
-      // remove locally
-      setHistory((prev) => prev.filter((h) => (h._id || h.id) !== historyId));
-      setCount((c) => Math.max(0, c - 1));
-    } catch (err) {
-      console.error("delete history error:", err);
-      alert(err?.response?.data?.message || "Failed to delete history entry");
+  const getField = (obj, keys) => {
+    if (!obj) return "—";
+    const tryKeys = Array.isArray(keys) ? keys : [keys];
+    for (const k of tryKeys) {
+      if (k in obj && obj[k] !== null && obj[k] !== undefined) return obj[k];
+      if (typeof k === "string") {
+        const camel = k
+          .replace(/[_\s]+([a-zA-Z])/g, (_, c) => c.toUpperCase())
+          .replace(/\s/g, "");
+        if (camel in obj && obj[camel] !== null && obj[camel] !== undefined)
+          return obj[camel];
+        const underscored = k.replace(/\s+/g, "_");
+        if (
+          underscored in obj &&
+          obj[underscored] !== null &&
+          obj[underscored] !== undefined
+        )
+          return obj[underscored];
+      }
     }
+    return "—";
   };
 
-  const handleEditHistory = (entry) => {
-    // navigate to an edit-history page (you can implement it)
-    const historyId = entry._id || entry.id;
-    navigate(`/edithistory/${historyId}`, { state: { entry, cardMeta: meta, rfidId: id } });
+  const splitDateTime = (dateStr, timeStr) => ({
+    date: dateStr || "—",
+    time: timeStr || "—",
+  });
+
+  const safeNum = (v) => {
+    if (v === null || v === undefined || v === "") return "—";
+    const n = Number(v);
+    return Number.isFinite(n) ? n : v;
   };
 
-  // styles (keeps design consistent with your record list)
+  // ---- Compact layout styles ----
   const styles = {
     page: {
-      padding: "10px",
+      padding: "10px 20px 20px",
       background: "#f5f7fb",
       minHeight: "100vh",
-      fontFamily: "Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+      fontFamily: "Segoe UI, Roboto, Arial",
     },
-    container: { maxWidth: "1200px", margin: "0 auto" },
+    container: { maxWidth: 1200, margin: "0 auto" },
     card: {
       background: "#fff",
       borderRadius: 12,
-      padding: 20,
+      padding: 10,
       boxShadow: "0 6px 18px rgba(20,30,60,0.06)",
     },
     backBtn: {
@@ -98,7 +117,7 @@ export default function RfidHistory() {
       padding: "8px 14px",
       borderRadius: 6,
       cursor: "pointer",
-      marginBottom: 16,
+      marginBottom: 12,
       fontWeight: 600,
     },
     title: {
@@ -106,74 +125,47 @@ export default function RfidHistory() {
       fontSize: 22,
       fontWeight: 700,
       color: "#1f2937",
-      marginBottom: 18,
+      marginBottom: 12, // smaller gap between title & table
     },
     tableWrap: {
       overflowX: "auto",
       borderRadius: 8,
       border: "1px solid #e6e8ea",
     },
-    table: { width: "100%", borderCollapse: "collapse", minWidth: 1200 },
+    table: { width: "100%", borderCollapse: "collapse", minWidth: 900 },
     th: {
-      padding: "12px 10px",
-      textAlign: "center",
-      fontWeight: 800,
-      fontSize: 13,
+      padding: 12,
       background: "#0b74ff",
       color: "#fff",
-      position: "sticky",
-      top: 0,
-      zIndex: 2,
-      whiteSpace: "nowrap",
+      textAlign: "center",
+      fontWeight: 700,
     },
     td: {
-      padding: "10px",
+      padding: 10,
       textAlign: "center",
       borderBottom: "1px solid #f1f5f9",
       color: "#111827",
       fontSize: 14,
-      whiteSpace: "nowrap",
     },
-    personRow: { background: "#eef5ff", fontWeight: 600, color: "#0b74ff" },
-    emptyRow: {
-      padding: 20,
+    empty: {
+      padding: 24,
       textAlign: "center",
       color: "#6b7280",
       fontStyle: "italic",
     },
-    actionBtn: {
-      padding: "6px 10px",
-      borderRadius: 6,
-      border: "none",
-      cursor: "pointer",
-      fontWeight: 700,
-    },
-    editBtn: { background: "#10b981", color: "#fff", marginRight: 8 },
-    delBtn: { background: "#ef4444", color: "#fff" },
   };
 
-  // new column headings exactly as requested
   const headers = [
     "S.No",
-    "RFID Serial No",
-    "RFID UID",
-    "Username",
-    "TimeStamp",
-    "Device_ID",
-    "Amt_Debited",
-    "Remaining_Card_Balance",
-    "No_of_Litres_Consumed",
-    "Remarks",
-    "Action",
+    "RFID_UID",
+    "Device Id",
+    "Remaining Card Balance",
+    "Date",
+    "Time",
+    "Litres Consumed",
+    "Amount Debited",
+    "Price Per Litre",
   ];
-
-  // helper to extract fields safely from entry
-  const getField = (entry, field) => {
-    // check meta first, then cardSnapshot, then top-level keys
-    const meta = entry.meta || {};
-    const snap = entry.cardSnapshot || {};
-    return meta[field] ?? snap[field] ?? entry[field] ?? "—";
-  };
 
   return (
     <div style={styles.page}>
@@ -182,13 +174,15 @@ export default function RfidHistory() {
           <button style={styles.backBtn} onClick={() => navigate(-1)}>
             ← Back
           </button>
-
           <h2 style={styles.title}>RFID Card History</h2>
 
-          {loading && <div style={styles.emptyRow}>Loading history...</div>}
-          {!loading && error && <div style={{ color: "red", textAlign: "center" }}>{error}</div>}
+          {loading && <div style={styles.empty}>Loading data...</div>}
+          {!loading && error && (
+            <div style={{ color: "red", textAlign: "center", marginBottom: 12 }}>
+              {error}
+            </div>
+          )}
 
-          {/* Table */}
           {!loading && !error && (
             <div style={styles.tableWrap}>
               <table style={styles.table}>
@@ -201,69 +195,62 @@ export default function RfidHistory() {
                     ))}
                   </tr>
                 </thead>
-
                 <tbody>
-                  {/* Person summary row (if we have meta data) */}
-                  {meta && (meta.rfid_serial_no || meta.rfid_uid || meta.user_name) ? (
-                    <tr style={styles.personRow}>
-                      <td style={styles.td}>1</td>
-                      <td style={styles.td}>{meta.rfid_serial_no || "—"}</td>
-                      <td style={styles.td}>{meta.rfid_uid || "—"}</td>
-                      <td style={styles.td}>{meta.user_name || "—"}</td>
-                      <td style={styles.td}>—</td>
-                      <td style={styles.td}>—</td>
-                      <td style={styles.td}>—</td>
-                      <td style={styles.td}>—</td>
-                      <td style={styles.td}>—</td>
-                      <td style={styles.td}>{meta.remarks || "—"}</td>
-                      <td style={styles.td}>—</td>
-                    </tr>
-                  ) : null}
-
-                  {/* History rows */}
                   {history.length > 0 ? (
-                    history.map((h, i) => {
-                      const idx = (i + 2); // account for person summary row
-                      const historyId = h._id || h.id || `${i}`;
-                      // determine timestamp
-                      const ts = h.timestamp || h.createdAt || h.created_at || null;
-                      const tsStr = ts ? new Date(ts).toLocaleString() : "—";
-
-                      // look for the fields in meta/cardSnapshot/top-level
-                      const rfidSerial = getField(h, "rfid_serial_no") !== "—" ? getField(h, "rfid_serial_no") : getField(h, "rfidSerial");
-                      const rfidUid = getField(h, "rfid_uid") !== "—" ? getField(h, "rfid_uid") : getField(h, "rfidUhd");
-                      const username = getField(h, "user_name") !== "—" ? getField(h, "user_name") : getField(h, "name");
-                      const deviceId = getField(h, "device_id");
-                      const amtDebited = getField(h, "amt_debited") ?? getField(h, "amount") ?? "—";
-                      const remainingBal = getField(h, "remaining_balance") ?? getField(h, "card_balance") ?? "—";
-                      const litres = getField(h, "litres_consumed") ?? getField(h, "litres") ?? getField(h, "no_of_litres") ?? "—";
-                      const remarks = getField(h, "remarks") ?? (h.note || "—");
+                    history.map((item, i) => {
+                      const rfid = getField(item, [
+                        "RFID_UID",
+                        "RFID UID",
+                        "rfid_uid",
+                        "uid",
+                      ]);
+                      const deviceId = getField(item, [
+                        "Device Id",
+                        "DeviceId",
+                        "device_id",
+                      ]);
+                      const remaining = getField(item, [
+                        "Remaining Card Balance",
+                        "RemainingBalance",
+                        "remaining_card_balance",
+                      ]);
+                      const litres = getField(item, [
+                        "Litres Consumed",
+                        "Litres",
+                        "litres_consumed",
+                      ]);
+                      const amount = getField(item, [
+                        "Amount Debited",
+                        "AmountDebited",
+                        "amount_debited",
+                      ]);
+                      const price = getField(item, [
+                        "Price Per Litre",
+                        "PricePerLitre",
+                        "price_per_litre",
+                      ]);
+                      const dateField = getField(item, ["Date", "date"]);
+                      const timeField = getField(item, ["Time", "time"]);
+                      const { date, time } = splitDateTime(dateField, timeField);
 
                       return (
-                        <tr key={historyId}>
-                          <td style={styles.td}>{idx}</td>
-                          <td style={styles.td}>{rfidSerial}</td>
-                          <td style={styles.td}>{rfidUid}</td>
-                          <td style={styles.td}>{username}</td>
-                          <td style={styles.td}>{tsStr}</td>
+                        <tr key={i}>
+                          <td style={styles.td}>{i + 1}</td>
+                          <td style={styles.td}>{rfid}</td>
                           <td style={styles.td}>{deviceId}</td>
-                          <td style={styles.td}>{amtDebited}</td>
-                          <td style={styles.td}>{remainingBal}</td>
-                          <td style={styles.td}>{litres}</td>
-                          <td style={styles.td}>{remarks}</td>
-                          <td style={styles.td}>
-                            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-                              <button style={{ ...styles.actionBtn, ...styles.editBtn }} onClick={() => handleEditHistory(h)}>Edit</button>
-                              <button style={{ ...styles.actionBtn, ...styles.delBtn }} onClick={() => handleDeleteHistory(historyId)}>Delete</button>
-                            </div>
-                          </td>
+                          <td style={styles.td}>{safeNum(remaining)}</td>
+                          <td style={styles.td}>{date}</td>
+                          <td style={styles.td}>{time}</td>
+                          <td style={styles.td}>{safeNum(litres)}</td>
+                          <td style={styles.td}>{safeNum(amount)}</td>
+                          <td style={styles.td}>{safeNum(price)}</td>
                         </tr>
                       );
                     })
                   ) : (
                     <tr>
-                      <td colSpan={11} style={styles.emptyRow}>
-                        No history entries found
+                      <td colSpan={headers.length} style={styles.empty}>
+                        No records found
                       </td>
                     </tr>
                   )}

@@ -1,5 +1,4 @@
 const Rfid = require('../models/Rfid');
-const RfidHistory = require('../models/RfidHistory');
 
 /**
  * @desc Create a new RFID record (User)
@@ -7,34 +6,72 @@ const RfidHistory = require('../models/RfidHistory');
  */
 exports.createRfid = async (req, res) => {
   try {
-    const data = req.body;
+    const data = req.body || {};
 
-    // Validation
+    // Minimal validation
     if (!data.user_name || !data.mobile_no) {
       return res.status(400).json({ message: 'User name and Mobile number are required' });
     }
 
+    // Normalize identifiers to strings to preserve leading zeros
+    if (data.aadhar_no !== undefined && data.aadhar_no !== null)
+      data.aadhar_no = String(data.aadhar_no);
+    if (data.mobile_no !== undefined && data.mobile_no !== null)
+      data.mobile_no = String(data.mobile_no);
+
+    // Parse numeric fields safely
+    const family_mems = data.family_mems !== undefined ? Number(data.family_mems) : 0;
+    const quant_water_alloted_per_day =
+      data.quant_water_alloted_per_day !== undefined
+        ? Number(data.quant_water_alloted_per_day)
+        : 0;
+    const quant_water_alloted_per_month =
+      data.quant_water_alloted_per_month !== undefined
+        ? Number(data.quant_water_alloted_per_month)
+        : 0;
+    const swipe_count = data.swipe_count !== undefined ? Number(data.swipe_count) : 0;
+    const total_litres_consumed =
+      data.total_litres_consumed !== undefined ? Number(data.total_litres_consumed) : 0;
+
+    // remaining_card_balance: ensure a non-negative number
+    let remaining_card_balance = 0;
+    if (data.remaining_card_balance !== undefined && data.remaining_card_balance !== null) {
+      const n = Number(data.remaining_card_balance);
+      remaining_card_balance = Number.isNaN(n) ? 0 : n < 0 ? 0 : n;
+    }
+
     const rfid = new Rfid({
-      rfid_serial_no: data.rfid_serial_no,
-      rfid_uid: data.rfid_uid,
+      rfid_serial_no: data.rfid_serial_no || '',
+      rfid_uid: data.rfid_uid || '',
       user_name: data.user_name,
-      address: data.address,
-      village: data.village,
-      aadhar_no: data.aadhar_no,
+      address: data.address || '',
+      village: data.village || '',
+      aadhar_no: data.aadhar_no || '',
       mobile_no: data.mobile_no,
-      family_mems: data.family_mems || 0,
-      quant_water_alloted_per_day: data.quant_water_alloted_per_day || 0,
-      quant_water_alloted_per_month: data.quant_water_alloted_per_month || 0,
-      swipe_count: data.swipe_count || 0,
-      quant_water_used_in_month: data.quant_water_used_in_month || 0,
-      allotment: data.allotment || '',
-      remarks: data.remarks || ''
+      family_mems: Number.isNaN(family_mems) ? 0 : family_mems,
+      quant_water_alloted_per_day: Number.isNaN(quant_water_alloted_per_day)
+        ? 0
+        : quant_water_alloted_per_day,
+      quant_water_alloted_per_month: Number.isNaN(quant_water_alloted_per_month)
+        ? 0
+        : quant_water_alloted_per_month,
+      swipe_count: Number.isNaN(swipe_count) ? 0 : swipe_count,
+      total_litres_consumed: Number.isNaN(total_litres_consumed)
+        ? 0
+        : total_litres_consumed,
+      remaining_card_balance,
+      remarks: data.remarks || '',
     });
 
     const saved = await rfid.save();
     return res.status(201).json(saved);
   } catch (err) {
     console.error('createRfid error:', err);
+    if (err.code === 11000) {
+      return res
+        .status(409)
+        .json({ message: 'Duplicate key error', error: err.message });
+    }
     return res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
@@ -76,28 +113,65 @@ exports.getRfidById = async (req, res) => {
 exports.updateRfid = async (req, res) => {
   try {
     const id = req.params.id;
-    const data = req.body;
+    const data = req.body || {};
+
+    if (data.aadhar_no !== undefined && data.aadhar_no !== null)
+      data.aadhar_no = String(data.aadhar_no);
+    if (data.mobile_no !== undefined && data.mobile_no !== null)
+      data.mobile_no = String(data.mobile_no);
+
+    const updateFields = {};
+
+    const setters = [
+      'rfid_serial_no',
+      'rfid_uid',
+      'user_name',
+      'address',
+      'village',
+      'aadhar_no',
+      'mobile_no',
+      'remarks',
+    ];
+    setters.forEach((k) => {
+      if (data[k] !== undefined) updateFields[k] = data[k];
+    });
+
+    // numeric fields
+    if (data.family_mems !== undefined) {
+      const v = Number(data.family_mems);
+      updateFields.family_mems = Number.isNaN(v) ? 0 : v;
+    }
+    if (data.quant_water_alloted_per_day !== undefined) {
+      const v = Number(data.quant_water_alloted_per_day);
+      updateFields.quant_water_alloted_per_day = Number.isNaN(v) ? 0 : v;
+    }
+    if (data.quant_water_alloted_per_month !== undefined) {
+      const v = Number(data.quant_water_alloted_per_month);
+      updateFields.quant_water_alloted_per_month = Number.isNaN(v) ? 0 : v;
+    }
+    if (data.swipe_count !== undefined) {
+      const v = Number(data.swipe_count);
+      updateFields.swipe_count = Number.isNaN(v) ? 0 : v;
+    }
+    if (data.total_litres_consumed !== undefined) {
+      const v = Number(data.total_litres_consumed);
+      updateFields.total_litres_consumed = Number.isNaN(v) ? 0 : v;
+    }
+
+    // remaining_card_balance: validate non-negative
+    if (data.remaining_card_balance !== undefined) {
+      const v = Number(data.remaining_card_balance);
+      if (Number.isNaN(v) || v < 0) {
+        return res
+          .status(400)
+          .json({ message: 'remaining_card_balance must be a non-negative number' });
+      }
+      updateFields.remaining_card_balance = v;
+    }
 
     const updated = await Rfid.findByIdAndUpdate(
       id,
-      {
-        $set: {
-          rfid_serial_no: data.rfid_serial_no,
-          rfid_uid: data.rfid_uid,
-          user_name: data.user_name,
-          address: data.address,
-          village: data.village,
-          aadhar_no: data.aadhar_no,
-          mobile_no: data.mobile_no,
-          family_mems: data.family_mems || 0,
-          quant_water_alloted_per_day: data.quant_water_alloted_per_day || 0,
-          quant_water_alloted_per_month: data.quant_water_alloted_per_month || 0,
-          swipe_count: data.swipe_count || 0,
-          quant_water_used_in_month: data.quant_water_used_in_month || 0,
-          allotment: data.allotment || '',
-          remarks: data.remarks || ''
-        }
-      },
+      { $set: updateFields },
       { new: true, runValidators: true }
     );
 
@@ -105,7 +179,7 @@ exports.updateRfid = async (req, res) => {
     return res.json(updated);
   } catch (err) {
     console.error('updateRfid error:', err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 
@@ -119,9 +193,7 @@ exports.deleteRfid = async (req, res) => {
     const removed = await Rfid.findByIdAndDelete(id);
     if (!removed) return res.status(404).json({ message: 'Record not found' });
 
-    // Also delete related history entries
     await RfidHistory.deleteMany({ rfidId: id });
-
     return res.json({ message: 'RFID record and history deleted successfully' });
   } catch (err) {
     console.error('deleteRfid error:', err);
@@ -158,11 +230,11 @@ exports.getRfidHistory = async (req, res) => {
         quant_water_alloted_per_day: card.quant_water_alloted_per_day,
         quant_water_alloted_per_month: card.quant_water_alloted_per_month,
         swipe_count: card.swipe_count,
-        quant_water_used_in_month: card.quant_water_used_in_month,
-        allotment: card.allotment,
-        remarks: card.remarks
+        total_litres_consumed: card.total_litres_consumed,
+        remaining_card_balance: card.remaining_card_balance,
+        remarks: card.remarks,
       },
-      history
+      history,
     });
   } catch (err) {
     console.error('getRfidHistory error:', err);
@@ -182,8 +254,6 @@ exports.createRfidHistory = async (req, res) => {
     if (!id) return res.status(400).json({ message: 'RFID ID missing' });
 
     const card = await Rfid.findById(id).lean();
-    console.log('[createRfidHistory] found card=', !!card);
-
     if (!card) return res.status(404).json({ message: 'RFID card not found' });
 
     const snapshot = {
@@ -198,21 +268,24 @@ exports.createRfidHistory = async (req, res) => {
       quant_water_alloted_per_day: card.quant_water_alloted_per_day,
       quant_water_alloted_per_month: card.quant_water_alloted_per_month,
       swipe_count: card.swipe_count,
-      quant_water_used_in_month: card.quant_water_used_in_month,
-      allotment: card.allotment,
-      remarks: card.remarks
+      total_litres_consumed: card.total_litres_consumed,
+      remaining_card_balance: card.remaining_card_balance,
+      remarks: card.remarks,
     };
 
     const newEntry = new RfidHistory({
       rfidId: id,
       cardSnapshot: snapshot,
       meta: req.body.meta || {},
-      timestamp: req.body.timestamp ? new Date(req.body.timestamp) : undefined
+      timestamp: req.body.timestamp ? new Date(req.body.timestamp) : undefined,
     });
 
     const saved = await newEntry.save();
     console.log('[createRfidHistory] saved id=', saved._id);
-    return res.status(201).json({ message: 'RFID history entry created successfully', data: saved });
+    return res.status(201).json({
+      message: 'RFID history entry created successfully',
+      data: saved,
+    });
   } catch (err) {
     console.error('[createRfidHistory] error:', err);
     return res.status(500).json({ message: 'Server error', error: err.message });

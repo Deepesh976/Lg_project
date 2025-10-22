@@ -1,4 +1,4 @@
-// EditRfidCard.js
+// src/pages/editrfidcard.js
 import React, { useEffect, useState } from "react";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -8,47 +8,75 @@ function EditRfidCard() {
   const { id } = useParams();
   const navigate = useNavigate();
 
+  const allowedFields = [
+    "rfid_serial_no",
+    "rfid_uid",
+    "user_name",
+    "address",
+    "village",
+    "aadhar_no",
+    "mobile_no",
+    "family_mems",
+    "quant_water_alloted_per_day",
+    "quant_water_alloted_per_month",
+    "swipe_count",
+    "total_litres_consumed",
+    "remaining_card_balance",
+    "remarks",
+  ];
+
   const [form, setForm] = useState({
-    rfidSerial: "",
-    rfidUhd: "",
-    name: "",
+    rfid_serial_no: "",
+    rfid_uid: "",
+    user_name: "",
     address: "",
     village: "",
-    aadhar: "",
-    mobile: "",
-    members: "",
-    qtyPerDay: "",
-    qtyPerMonth: "",
-    visitsPerMonth: "",
-    qtyUsedMonth: "",
+    aadhar_no: "",
+    mobile_no: "",
+    family_mems: "",
+    quant_water_alloted_per_day: "",
+    quant_water_alloted_per_month: "",
+    swipe_count: "",
+    total_litres_consumed: "",
+    remaining_card_balance: "",
     remarks: "",
   });
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // ✅ Field labels
+  // Label map for display
   const labels = {
-    rfidSerial: "RFID Card Serial Number",
-    rfidUhd: "RFID Card UID / Number",
-    name: "Full Name",
+    rfid_serial_no: "RFID Card Serial Number",
+    rfid_uid: "RFID UID",
+    user_name: "Full Name",
     address: "Address",
-    village: "Village Name",
-    aadhar: "Aadhar Number",
-    mobile: "Mobile Number",
-    members: "Number of Family Members",
-    qtyPerDay: "Water Quantity Per Day (L)",
-    qtyPerMonth: "Water Quantity Per Month (L)",
-    visitsPerMonth: "Visits Per Month",
-    qtyUsedMonth: "Quantity Used This Month (L)",
+    village: "Village",
+    aadhar_no: "Aadhar Number",
+    mobile_no: "Mobile Number",
+    family_mems: "Number of Family Members",
+    quant_water_alloted_per_day: "Water / Day (L)",
+    quant_water_alloted_per_month: "Water / Month (L)",
+    swipe_count: "No of Times Visited",
+    total_litres_consumed: "Total Litres Consumed (L)",
+    remaining_card_balance: "Remaining Card Balance (₹)",
     remarks: "Remarks / Notes",
   };
 
+  // Fetch record on mount or prefill from navigation state (but only allowed fields)
   useEffect(() => {
     if (state && typeof state === "object" && Object.keys(state).length) {
-      setForm((prev) => ({ ...prev, ...state }));
+      // filter the incoming state to only allowed fields (prevents copying _id, __v, createdAt, allotment, etc.)
+      const filtered = {};
+      allowedFields.forEach((k) => {
+        if (state[k] !== undefined) filtered[k] = state[k];
+      });
+      setForm((prev) => ({ ...prev, ...filtered }));
+      setLoading(false);
+    } else {
+      fetchRecord();
     }
-    fetchRecord();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const fetchRecord = async () => {
@@ -63,25 +91,28 @@ function EditRfidCard() {
       if (!res?.data) {
         setError("Record not found.");
       } else {
+        const d = res.data;
+        // Map only the allowed fields explicitly (ignore _id, createdAt, updatedAt, __v, allotment)
         setForm({
-          rfidSerial: res.data.rfidSerial || "",
-          rfidUhd: res.data.rfidUhd || "",
-          name: res.data.name || "",
-          address: res.data.address || "",
-          village: res.data.village || "",
-          aadhar: res.data.aadhar || "",
-          mobile: res.data.mobile || "",
-          members: res.data.members || "",
-          qtyPerDay: res.data.qtyPerDay || "",
-          qtyPerMonth: res.data.qtyPerMonth || "",
-          visitsPerMonth: res.data.visitsPerMonth || "",
-          qtyUsedMonth: res.data.qtyUsedMonth || "",
-          remarks: res.data.remarks || "",
+          rfid_serial_no: d.rfid_serial_no || "",
+          rfid_uid: d.rfid_uid || "",
+          user_name: d.user_name || "",
+          address: d.address || "",
+          village: d.village || "",
+          aadhar_no: d.aadhar_no || "",
+          mobile_no: d.mobile_no || "",
+          family_mems: d.family_mems ?? "",
+          quant_water_alloted_per_day: d.quant_water_alloted_per_day ?? "",
+          quant_water_alloted_per_month: d.quant_water_alloted_per_month ?? "",
+          swipe_count: d.swipe_count ?? "",
+          total_litres_consumed: d.total_litres_consumed ?? "",
+          remaining_card_balance: d.remaining_card_balance ?? "",
+          remarks: d.remarks || "",
         });
       }
     } catch (err) {
       console.error("fetchRecord error:", err);
-      setError(err.response ? `Server error: ${err.response.statusText}` : "Network error");
+      setError(err?.response ? `Server error: ${err.response.statusText}` : "Network error");
     } finally {
       setLoading(false);
     }
@@ -96,8 +127,27 @@ function EditRfidCard() {
     e.preventDefault();
     try {
       setLoading(true);
-      await axios.put(`/api/rfid/${id}`, form);
-      alert("Record updated successfully!");
+
+      // Prepare payload with proper number conversions (only allowed fields)
+      const payload = {
+        rfid_serial_no: (form.rfid_serial_no || "").trim(),
+        rfid_uid: (form.rfid_uid || "").trim(),
+        user_name: (form.user_name || "").trim(),
+        address: (form.address || "").trim(),
+        village: (form.village || "").trim(),
+        aadhar_no: (form.aadhar_no || "").toString().trim(),
+        mobile_no: (form.mobile_no || "").toString().trim(),
+        family_mems: Number(form.family_mems) || 0,
+        quant_water_alloted_per_day: Number(form.quant_water_alloted_per_day) || 0,
+        quant_water_alloted_per_month: Number(form.quant_water_alloted_per_month) || 0,
+        swipe_count: Number(form.swipe_count) || 0,
+        total_litres_consumed: Number(form.total_litres_consumed) || 0,
+        remaining_card_balance: Number(form.remaining_card_balance) || 0,
+        remarks: (form.remarks || "").trim(),
+      };
+
+      await axios.put(`/api/rfid/${id}`, payload);
+      alert("RFID record updated successfully!");
       navigate("/rfidcard");
     } catch (err) {
       console.error("Update error:", err);
@@ -122,10 +172,10 @@ function EditRfidCard() {
     }
   };
 
-  // === Inline Styles ===
+  // === Styles ===
   const styles = {
     container: {
-      padding: "5px",
+      padding: "20px",
       maxWidth: "900px",
       margin: "0 auto",
       fontFamily: "Segoe UI, sans-serif",
@@ -134,21 +184,13 @@ function EditRfidCard() {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
       gap: "20px",
-      padding: "50px",
+      padding: "30px",
       borderRadius: "10px",
       background: "#fff",
-      boxShadow: "0 2px 10px rgba(0,0,0,0.1)",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
     },
-    labelContainer: {
-      display: "flex",
-      flexDirection: "column",
-      textAlign: "left",
-    },
-    label: {
-      fontWeight: "600",
-      marginBottom: "6px",
-      color: "#333",
-    },
+    labelContainer: { display: "flex", flexDirection: "column", textAlign: "left" },
+    label: { fontWeight: "600", marginBottom: "6px", color: "#333" },
     input: {
       padding: "10px",
       border: "1px solid #ccc",
@@ -158,7 +200,7 @@ function EditRfidCard() {
       textAlign: "center",
     },
     btnPrimary: {
-      backgroundColor: "#007bff",
+      backgroundColor: "#0b74ff",
       color: "#fff",
       border: "none",
       borderRadius: "6px",
@@ -182,11 +224,7 @@ function EditRfidCard() {
       gap: "10px",
       marginTop: "10px",
     },
-    error: {
-      color: "#b00020",
-      marginBottom: "12px",
-      textAlign: "center",
-    },
+    error: { color: "#b00020", marginBottom: "12px", textAlign: "center" },
   };
 
   return (
@@ -199,7 +237,7 @@ function EditRfidCard() {
 
       {!loading && !error && (
         <form style={styles.form} onSubmit={handleUpdate}>
-          {Object.keys(form).map((key) => (
+          {allowedFields.map((key) => (
             <div key={key} style={styles.labelContainer}>
               <label htmlFor={key} style={styles.label}>
                 {labels[key] || key}
@@ -207,12 +245,19 @@ function EditRfidCard() {
               <input
                 id={key}
                 type={
-                  key.includes("qty") || key === "members" || key === "visitsPerMonth"
+                  [
+                    "family_mems",
+                    "quant_water_alloted_per_day",
+                    "quant_water_alloted_per_month",
+                    "swipe_count",
+                    "total_litres_consumed",
+                    "remaining_card_balance",
+                  ].includes(key)
                     ? "number"
                     : "text"
                 }
                 name={key}
-                value={form[key] || ""}
+                value={form[key] ?? ""}
                 onChange={handleChange}
                 style={styles.input}
               />

@@ -3,44 +3,25 @@ const mongoose = require('mongoose');
 const { Schema } = mongoose;
 
 /**
- * Flow point used in flowRate arrays.
- * We keep `time` as String because devices may send ISO strings or epoch numbers.
- */
-const FlowPointSchema = new Schema(
-  {
-    time: { type: String, required: false },
-    value: { type: Number, default: 0 },
-  },
-  { _id: false }
-);
-
-/**
  * AnalysisSchema
- * - Designed to be flexible: handles UF and ATW fields
- * - Keeps meta/metadata for backward compatibility with legacy documents
- * - Includes explicit date/time/date_time fields requested
+ * - Handles only ATW-related fields now.
+ * - Retains meta/metadata for backward compatibility with older documents.
  */
 const AnalysisSchema = new Schema(
   {
-    // Canonical grouping key (preferred)
+    // Grouping key (preferred)
     setupId: { type: String, index: true, sparse: true },
 
-    // legacy containers
+    // Metadata containers (legacy support)
     meta: { type: Schema.Types.Mixed, default: {} },
     metadata: { type: Schema.Types.Mixed, default: {} },
 
-    // device / role
-    role: { type: String, index: true }, // 'UF' or 'ATW'
-    deviceLabel: { type: String }, // human-friendly label
-    deviceId: { type: String, index: true }, // vendor device id
-    machine_id: { type: String, index: true }, // alternate machine id key (some docs use this)
+    // Device information
+    role: { type: String, index: true }, // 'ATW'
+    deviceLabel: { type: String },
+    deviceId: { type: String, index: true },
+    machine_id: { type: String, index: true },
     uid: { type: String }, // user/card id (if present)
-
-    /* ---------- UF fields ---------- */
-    tds: { type: Number, default: null },
-    pulseCount: { type: Number, default: null },
-    flowRate: { type: [FlowPointSchema], default: [] }, // normalized array
-    flowRateRaw: { type: Schema.Types.Mixed, default: null },
 
     /* ---------- ATW explicit fields ---------- */
     water_dispensed: { type: Number, default: null },
@@ -49,43 +30,39 @@ const AnalysisSchema = new Schema(
     amount_debited: { type: Number, default: null },
     coin_collected_amount: { type: Number, default: null },
     remaining_balance: { type: Number, default: null },
-    user_card_activated: { type: Schema.Types.Mixed, default: null }, // can be boolean or string
+    user_card_activated: { type: Schema.Types.Mixed, default: null }, // boolean/string
     additional_status: { type: Schema.Types.Mixed, default: null },
 
-    /* ---------- date/time fields (explicit) ---------- */
-    date: { type: String, default: null }, // device-provided date (e.g. '2025-09-25')
-    time: { type: String, default: null }, // device-provided time (e.g. '14:32:05')
-    date_time: { type: String, default: null }, // combined date + time (string)
+    /* ---------- Date/time fields ---------- */
+    date: { type: String, default: null },       // e.g. '2025-09-25'
+    time: { type: String, default: null },       // e.g. '14:32:05'
+    date_time: { type: String, default: null },  // combined date + time
 
-    /* timestamp fields (keep both - controller normalizes) */
+    /* ---------- Timestamps ---------- */
     timestamp: { type: Date, default: null },
     recordedAt: { type: Date, default: null },
 
-    /* allow other unknown fields from devices to be stored */
+    /* ---------- Flexibility ---------- */
   },
   {
-    strict: false, // keep extra fields sent by devices
-    timestamps: true, // createdAt and updatedAt managed by mongoose
+    strict: false, // keep extra fields
+    timestamps: true, // adds createdAt, updatedAt
   }
 );
 
-/* Indexes commonly useful for queries */
+/* ---------- Indexes ---------- */
 AnalysisSchema.index({ setupId: 1, recordedAt: -1 });
 AnalysisSchema.index({ 'metadata.setup_id': 1, recordedAt: -1 });
 AnalysisSchema.index({ machine_id: 1, recordedAt: -1 });
 AnalysisSchema.index({ deviceId: 1, recordedAt: -1 });
 
-/**
- * Virtual: normalized keys
- * Access with doc.normalized.setupId / doc.normalized.machineId
- */
+/* ---------- Virtuals ---------- */
 AnalysisSchema.virtual('normalized').get(function () {
   const meta = this.metadata || this.meta || {};
   const setupId = this.setupId || meta.setup_id || meta.setupId || null;
   const machineId =
     this.machine_id || this.deviceId || meta.machine_id || meta.device_id || null;
 
-  // If date_time not present, attempt to build it from date + time (do not persist here)
   let dateTime = this.date_time || null;
   if (!dateTime) {
     const d = this.date || meta.date || null;
@@ -96,21 +73,17 @@ AnalysisSchema.virtual('normalized').get(function () {
   return { setupId, machineId, date_time: dateTime };
 });
 
-/* Ensure model reuse in watch/hot-reload environments */
+/* ---------- Models ---------- */
 const Analysis =
   mongoose.models.Analysis || mongoose.model('Analysis', AnalysisSchema);
 
-/* Convenience bindings to collection names you use in controllers */
 const AtwStats =
   mongoose.models.AtwStats ||
   mongoose.model('AtwStats', AnalysisSchema, 'atw_stats');
-const UfStats =
-  mongoose.models.UfStats || mongoose.model('UfStats', AnalysisSchema, 'uf_stats');
 
-/* Export models */
+/* ---------- Export ---------- */
 module.exports = {
   Analysis,
   AtwStats,
-  UfStats,
-  Schema, // optional export in case controllers want to reuse Schema/FlowPoint
+  Schema,
 };

@@ -3,10 +3,10 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import '../../styles/navbar.css';
 
 const menuItems = [
-  { path: '/deviceAnalysis', label: 'Device Analysis' },
+  { path: '/device', label: 'Devices' },
+  { path: '/user', label: 'Users' },
   { path: '/rfidcard', label: 'RFID CARD' },
-  { path: '/devices', label: 'Devices' },
-  { path: '/users', label: 'Users' },
+  { path: '/deviceAnalysis', label: 'Device Analysis' },
 ];
 
 const Navbar = () => {
