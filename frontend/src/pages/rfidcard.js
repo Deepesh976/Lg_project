@@ -1,4 +1,3 @@
-// src/pages/rfidcard.js
 import React, { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
@@ -17,7 +16,7 @@ function RfidCard() {
       minHeight: "100vh",
       fontFamily: "Segoe UI, Roboto, Helvetica, Arial, sans-serif",
     },
-    container: { maxWidth: "1200px", margin: "0 auto" },
+    container: { maxWidth: "1300px", margin: "0 auto" }, // increased container width
     card: {
       background: "#ffffff",
       borderRadius: 12,
@@ -58,7 +57,6 @@ function RfidCard() {
       borderRadius: 8,
       cursor: "pointer",
       fontWeight: 600,
-      opacity: 1,
     },
     tableWrap: {
       overflowX: "auto",
@@ -68,18 +66,19 @@ function RfidCard() {
     table: {
       width: "100%",
       borderCollapse: "collapse",
-      minWidth: 1400,
+      minWidth: 900, // increased minWidth for more space per column
     },
     thead: { background: "#0b74ff", color: "#fff" },
     th: {
-      padding: "12px 10px",
+      padding: "1px 1px",
       textAlign: "center",
       fontWeight: 800,
       fontSize: 14,
       borderRight: "1px solid rgba(255,255,255,0.12)",
-      whiteSpace: "normal", // allow wrapping
+      whiteSpace: "normal",
       overflowWrap: "break-word",
       wordBreak: "break-word",
+      minWidth: 110, // each column slightly wider
     },
     td: {
       padding: "12px 10px",
@@ -87,9 +86,10 @@ function RfidCard() {
       color: "#111827",
       fontSize: 14,
       borderBottom: "1px solid #f1f5f9",
-      whiteSpace: "normal", // allow wrapping
+      whiteSpace: "normal",
       overflowWrap: "break-word",
       wordBreak: "break-word",
+      minWidth: 100,
     },
     rowEven: { background: "#fff" },
     rowOdd: { background: "#fbfdff" },
@@ -212,7 +212,6 @@ function RfidCard() {
   };
 
   const handleViewHistory = (rec) => {
-    // prefer rfid_uid (non-empty) otherwise fallback to _id
     const uid =
       rec && rec.rfid_uid && String(rec.rfid_uid).trim() !== ""
         ? rec.rfid_uid
@@ -279,7 +278,6 @@ function RfidCard() {
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.card}>
-          {/* header with search (left), title (center), download (right) */}
           <div style={styles.header}>
             <div style={styles.headerLeft}>
               <input
@@ -296,10 +294,7 @@ function RfidCard() {
 
             <div style={styles.headerRight}>
               <button
-                style={{
-                  ...styles.downloadBtn,
-                  ...(loading ? styles.disabledBtn : {}),
-                }}
+                style={styles.downloadBtn}
                 onClick={handleDownload}
                 disabled={loading}
               >
@@ -357,22 +352,14 @@ function RfidCard() {
                         <td style={styles.td}>{r.remarks || "—"}</td>
                         <td style={styles.td}>
                           <button
-                            style={{
-                              ...styles.actionBtn,
-                              ...styles.editBtn,
-                              ...(loading ? styles.disabledBtn : {}),
-                            }}
+                            style={{ ...styles.actionBtn, ...styles.editBtn }}
                             onClick={() => handleEditNavigate(r)}
                             disabled={loading}
                           >
                             Edit
                           </button>
                           <button
-                            style={{
-                              ...styles.actionBtn,
-                              ...styles.delBtn,
-                              ...(loading ? styles.disabledBtn : {}),
-                            }}
+                            style={{ ...styles.actionBtn, ...styles.delBtn }}
                             onClick={() => handleDelete(r._id)}
                             disabled={loading}
                           >

@@ -13,7 +13,7 @@ router.get('/atw/:uid', async (req, res) => {
     const uid = req.params.uid;
     if (!uid) return res.status(400).json({ message: 'Missing UID' });
 
-    const deviceUrl = `http://192.168.0.207:11/api/v2/atw/stream/fetch?id=${encodeURIComponent(uid)}`;
+    const deviceUrl = `http://172.16.2.7:3999/api/v2/atw/stream/fetch?id=${encodeURIComponent(uid)}`;
 
     // If device requires headers/Auth, add them here
     const resp = await axios.get(deviceUrl, { timeout: 10000 });
