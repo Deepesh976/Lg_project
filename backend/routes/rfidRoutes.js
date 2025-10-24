@@ -23,4 +23,8 @@ router.put('/:id', validateObjectId, controller.updateRfid);
 // ✅ DELETE
 router.delete('/:id', validateObjectId, controller.deleteRfid);
 
+// GET proxy-backed history (no validateObjectId since 'id' may be uid)
+router.get('/:id/proxy-history', controller.getProxyHistory);
+
+
 module.exports = router;

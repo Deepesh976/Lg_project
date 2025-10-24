@@ -7,10 +7,14 @@ import axios from "axios";
  * - Reads device response like:
  *   { response: [ { "Device Id": "...", "RFID_UID": "...", "Remaining Card Balance": 64, "Date": "...", "Time": "...", "Litres Consumed": 15, "Amount Debited": 30, "Price Per Litre": 2 }, ... ] }
  * - No raw inspector, no edit/delete actions.
+ *
+ * Behavior changes:
+ * - Records are sorted so the most recently updated / newest records come first.
+ * - The parser is tolerant to common field names and several timestamp shapes.
  */
 
 export default function RfidHistory() {
-  const { id } = useParams(); // RFID UID
+  const { id } = useParams(); // RFID UID or _id depending on navigation
   const navigate = useNavigate();
 
   const [history, setHistory] = useState([]);
@@ -31,7 +35,7 @@ export default function RfidHistory() {
       const res = await axios.get(url, { timeout: 15000 });
       const data = res?.data ?? {};
 
-      // Handle { response: [...] } or direct arrays
+      // Extract array from common shapes
       let records = [];
       if (Array.isArray(data.response)) records = data.response;
       else if (Array.isArray(data)) records = data;
@@ -42,8 +46,24 @@ export default function RfidHistory() {
         records = arr || [];
       }
 
-      setHistory(records);
-      if (records.length === 0)
+      // Normalize and sort by timestamp (newest first)
+      const withTs = records.map((r) => {
+        return {
+          original: r,
+          ts: parseRecordTimestamp(r), // Date or null
+        };
+      });
+
+      withTs.sort((a, b) => {
+        const ta = a.ts ? a.ts.getTime() : 0;
+        const tb = b.ts ? b.ts.getTime() : 0;
+        return tb - ta; // newest first
+      });
+
+      const sorted = withTs.map((w) => w.original);
+      setHistory(sorted);
+
+      if (sorted.length === 0)
         setError("No data found for this RFID UID (proxy returned empty).");
     } catch (err) {
       console.error("fetchViaProxy error:", err);
@@ -59,6 +79,150 @@ export default function RfidHistory() {
     } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * Try to extract/parse a timestamp from a record
+   * Strategies:
+   * - If record has numeric 'timestamp' or 'ts' => use as millis or seconds
+   * - If has ISO-like field 'dateTime' or 'datetime' => parse directly
+   * - If has 'Date' and 'Time' fields (or variants) => join and parse
+   * - Fallback: try Date.parse on stringified record (not ideal)
+   */
+  const parseRecordTimestamp = (rec) => {
+    if (!rec || typeof rec !== "object") return null;
+
+    const get = (keys) => {
+      for (const k of keys) {
+        if (k in rec && rec[k] !== null && rec[k] !== undefined) return rec[k];
+        // try camel/underscored variants
+        const camel = k
+          .replace(/[_\s]+([a-zA-Z])/g, (_, c) => c.toUpperCase())
+          .replace(/\s/g, "");
+        if (camel in rec && rec[camel] !== null && rec[camel] !== undefined)
+          return rec[camel];
+        const underscored = k.replace(/\s+/g, "_");
+        if (
+          underscored in rec &&
+          rec[underscored] !== null &&
+          rec[underscored] !== undefined
+        )
+          return rec[underscored];
+      }
+      return undefined;
+    };
+
+    // 1) timestamp / ts (could be seconds or milliseconds)
+    const tsRaw = get(["timestamp", "timeStamp", "ts"]);
+    if (tsRaw !== undefined && tsRaw !== null && tsRaw !== "") {
+      const n = Number(tsRaw);
+      if (!Number.isNaN(n)) {
+        // heuristics: if large (>= 1e12) assume ms, if ~1e9 assume seconds
+        if (n > 1e12) return new Date(n);
+        if (n > 1e9) return new Date(n);
+        // seconds -> ms
+        if (n > 0) return new Date(n * 1000);
+      }
+      // try parse as ISO string
+      const parsedISO = Date.parse(String(tsRaw));
+      if (!Number.isNaN(parsedISO)) return new Date(parsedISO);
+    }
+
+    // 2) ISO-like datetime fields
+    const iso = get(["dateTime", "datetime", "DateTime", "dt"]);
+    if (iso) {
+      const parsed = Date.parse(String(iso));
+      if (!Number.isNaN(parsed)) return new Date(parsed);
+    }
+
+    // 3) Date + Time pair
+    const dateField = get(["Date", "date", "transaction_date", "TxnDate"]);
+    const timeField = get(["Time", "time", "transaction_time", "TxnTime"]);
+    if (dateField) {
+      // combine date and time (if any) into a parseable string
+      const dateStr = String(dateField).trim();
+      const timeStr = timeField ? String(timeField).trim() : "";
+      // common formats: "YYYY-MM-DD", "DD/MM/YYYY", "DD-MM-YYYY", time maybe "HH:mm" or "HH:mm:ss"
+      // Try a few parses:
+      const attempts = [];
+      if (timeStr) attempts.push(`${dateStr} ${timeStr}`);
+      attempts.push(dateStr);
+
+      for (const attempt of attempts) {
+        const p = tryParseFlexibleDate(attempt);
+        if (p) return p;
+      }
+    }
+
+    // 4) try common combined fields like 'Date_Time' or 'date_time'
+    const combined = get(["Date_Time", "date_time", "DateTime", "dateTime"]);
+    if (combined) {
+      const p = tryParseFlexibleDate(String(combined));
+      if (p) return p;
+    }
+
+    // 5) last resort: try parsing any stringified numeric/date-like field
+    try {
+      const str = JSON.stringify(rec);
+      const p = tryParseFlexibleDate(str);
+      if (p) return p;
+    } catch (e) {
+      // ignore
+    }
+
+    return null;
+  };
+
+  /**
+   * Flexible date parser:
+   * - Attempts Date.parse first
+   * - If fails and pattern is DD/MM/YYYY or DD-MM-YYYY, converts to YYYY-MM-DD for parsing
+   */
+  const tryParseFlexibleDate = (s) => {
+    if (!s) return null;
+    const str = String(s).trim();
+
+    // direct ISO-ish parse
+    const iso = Date.parse(str);
+    if (!Number.isNaN(iso)) return new Date(iso);
+
+    // handle "DD/MM/YYYY" or "DD-MM-YYYY" optionally with time "HH:mm[:ss]"
+    // split date and optional time
+    const parts = str.split(" ");
+    const datePart = parts[0];
+    const timePart = parts.slice(1).join(" ");
+
+    // match dd/mm/yyyy or dd-mm-yyyy
+    const dmy = datePart.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+    if (dmy) {
+      let dd = dmy[1].padStart(2, "0");
+      let mm = dmy[2].padStart(2, "0");
+      let yy = dmy[3];
+      // normalize year
+      if (yy.length === 2) {
+        // assume 20xx for two-digit years (safer for modern data)
+        yy = "20" + yy;
+      }
+      const isoLike = `${yy}-${mm}-${dd}` + (timePart ? ` ${timePart}` : "");
+      const parsed = Date.parse(isoLike);
+      if (!Number.isNaN(parsed)) return new Date(parsed);
+    }
+
+    // match yyyy/mm/dd or yyyy-mm-dd (already attempted via Date.parse but try again)
+    const ymd = datePart.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+    if (ymd) {
+      const isoLike = `${ymd[1]}-${String(ymd[2]).padStart(2, "0")}-${String(
+        ymd[3]
+      ).padStart(2, "0")}` + (timePart ? ` ${timePart}` : "");
+      const parsed = Date.parse(isoLike);
+      if (!Number.isNaN(parsed)) return new Date(parsed);
+    }
+
+    // fallback: try Date.parse on the whole string one more time
+    const last = Date.parse(str);
+    if (!Number.isNaN(last)) return new Date(last);
+
+    return null;
   };
 
   const getField = (obj, keys) => {

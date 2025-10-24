@@ -17,7 +17,7 @@ const app = express();
 
 // ==== Environment Variables ====
 const PORT = Number(process.env.PORT) || 5000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/rfid_db';
+const MONGO_URI = process.env.MONGO_URI;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
 
 // ==== Middleware ====
@@ -82,7 +82,7 @@ mongoose
   .connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
     console.log('✅ Connected to MongoDB');
-    app.listen(PORT, '0.0.0.0', () => {
+    app.listen(PORT, () => {
       console.log(`🚀 Server running at http://localhost:${PORT}`);
       console.log(`🌐 CORS allowed from: ${allowedOrigins.join(', ')}`);
     });

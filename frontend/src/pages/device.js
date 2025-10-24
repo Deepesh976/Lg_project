@@ -120,7 +120,7 @@ export default function Device() {
       'Device Id',
       'Location',
       'Price per litre',
-      'Total (L)',
+      'Total Dispensed (L)',
       'Status',
       'Last Update',
     ];
@@ -204,7 +204,7 @@ export default function Device() {
                   <th>Device Id</th>
                   <th>Location</th>
                   <th>Price per litre</th>
-                  <th>Total (L)</th>
+                  <th>Total Dispensed (L)</th>
                   <th>Status</th>
                   <th>Last Update</th>
                   <th>Action</th>

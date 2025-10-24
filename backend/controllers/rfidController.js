@@ -1,4 +1,177 @@
+// controllers/rfidController.js
+const axios = require('axios');
 const Rfid = require('../models/Rfid');
+
+// Try to require the history model (support common misspelling fallback)
+let RfidHistory = null;
+try {
+  RfidHistory = require('../models/RfidHistory');
+} catch (e1) {
+  try {
+    RfidHistory = require('../models/RfidHitory'); // fallback if file was misspelled
+  } catch (e2) {
+    RfidHistory = null;
+    console.warn(
+      'RfidHistory model not found (tried ../models/RfidHistory and ../models/RfidHitory). Model-backed history endpoints will return errors until model is added.'
+    );
+  }
+}
+
+/** ---------- Helpers: parse timestamps & normalize proxy data ---------- */
+
+const getField = (obj, keys) => {
+  if (!obj) return undefined;
+  const tryKeys = Array.isArray(keys) ? keys : [keys];
+  for (const k of tryKeys) {
+    if (k in obj && obj[k] !== null && obj[k] !== undefined) return obj[k];
+    if (typeof k === 'string') {
+      const camel = k
+        .replace(/[_\s]+([a-zA-Z])/g, (_, c) => c.toUpperCase())
+        .replace(/\s/g, '');
+      if (camel in obj && obj[camel] !== null && obj[camel] !== undefined)
+        return obj[camel];
+      const underscored = k.replace(/\s+/g, '_');
+      if (underscored in obj && obj[underscored] !== null && obj[underscored] !== undefined)
+        return obj[underscored];
+    }
+  }
+  return undefined;
+};
+
+const tryParseFlexibleDate = (s) => {
+  if (!s && s !== 0) return null;
+  const str = String(s).trim();
+
+  // direct ISO-ish parse
+  const iso = Date.parse(str);
+  if (!Number.isNaN(iso)) return new Date(iso);
+
+  // split date and optional time
+  const parts = str.split(' ');
+  const datePart = parts[0];
+  const timePart = parts.slice(1).join(' ');
+
+  // dd/mm/yyyy or dd-mm-yyyy
+  const dmy = datePart.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (dmy) {
+    let dd = dmy[1].padStart(2, '0');
+    let mm = dmy[2].padStart(2, '0');
+    let yy = dmy[3];
+    if (yy.length === 2) yy = '20' + yy;
+    const isoLike = `${yy}-${mm}-${dd}` + (timePart ? ` ${timePart}` : '');
+    const parsed = Date.parse(isoLike);
+    if (!Number.isNaN(parsed)) return new Date(parsed);
+  }
+
+  // yyyy/mm/dd or yyyy-mm-dd
+  const ymd = datePart.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+  if (ymd) {
+    const isoLike =
+      `${ymd[1]}-${String(ymd[2]).padStart(2, '0')}-${String(ymd[3]).padStart(2, '0')}` +
+      (timePart ? ` ${timePart}` : '');
+    const parsed = Date.parse(isoLike);
+    if (!Number.isNaN(parsed)) return new Date(parsed);
+  }
+
+  // fallback: final attempt
+  const last = Date.parse(str);
+  if (!Number.isNaN(last)) return new Date(last);
+
+  return null;
+};
+
+const parseRecordTimestamp = (rec) => {
+  if (!rec || typeof rec !== 'object') return null;
+
+  const get = (keys) => getField(rec, keys);
+
+  // 1) numeric timestamp / ts
+  const tsRaw = get(['timestamp', 'timeStamp', 'ts']);
+  if (tsRaw !== undefined && tsRaw !== null && tsRaw !== '') {
+    const n = Number(tsRaw);
+    if (!Number.isNaN(n)) {
+      // heuristics: if n >= 1e12 assume ms, if >1e9 treat as ms or seconds
+      if (n > 1e12) return new Date(n);
+      if (n > 1e9) return new Date(n);
+      if (n > 0) return new Date(n * 1000);
+    }
+    const parsedISO = Date.parse(String(tsRaw));
+    if (!Number.isNaN(parsedISO)) return new Date(parsedISO);
+  }
+
+  // 2) ISO-like fields
+  const iso = get(['dateTime', 'datetime', 'DateTime', 'dt']);
+  if (iso) {
+    const parsed = Date.parse(String(iso));
+    if (!Number.isNaN(parsed)) return new Date(parsed);
+  }
+
+  // 3) Date + Time pair
+  const dateField = get(['Date', 'date', 'transaction_date', 'TxnDate']);
+  const timeField = get(['Time', 'time', 'transaction_time', 'TxnTime']);
+  if (dateField) {
+    const dateStr = String(dateField).trim();
+    const timeStr = timeField ? String(timeField).trim() : '';
+    const attempts = [];
+    if (timeStr) attempts.push(`${dateStr} ${timeStr}`);
+    attempts.push(dateStr);
+
+    for (const attempt of attempts) {
+      const p = tryParseFlexibleDate(attempt);
+      if (p) return p;
+    }
+  }
+
+  // 4) combined date_time fields
+  const combined = get(['Date_Time', 'date_time', 'DateTime', 'dateTime']);
+  if (combined) {
+    const p = tryParseFlexibleDate(String(combined));
+    if (p) return p;
+  }
+
+  // 5) try stringified fallback
+  try {
+    const str = JSON.stringify(rec);
+    const p = tryParseFlexibleDate(str);
+    if (p) return p;
+  } catch (e) {
+    // ignore
+  }
+
+  return null;
+};
+
+/**
+ * Normalize device/proxy record into a predictable shape:
+ * { rfid_uid, device_id, remaining_card_balance, dateStr, timeStr, litres, amount, price, raw }
+ */
+const normalizeProxyRecord = (item) => {
+  const rfid = getField(item, ['RFID_UID', 'RFID UID', 'rfid_uid', 'uid']) || '';
+  const deviceId = getField(item, ['Device Id', 'DeviceId', 'device_id']) || '';
+  const remaining = getField(item, [
+    'Remaining Card Balance',
+    'RemainingBalance',
+    'remaining_card_balance',
+  ]);
+  const litres = getField(item, ['Litres Consumed', 'Litres', 'litres_consumed']);
+  const amount = getField(item, ['Amount Debited', 'AmountDebited', 'amount_debited']);
+  const price = getField(item, ['Price Per Litre', 'PricePerLitre', 'price_per_litre']);
+  const dateField = getField(item, ['Date', 'date']);
+  const timeField = getField(item, ['Time', 'time']);
+  return {
+    rfid_uid: rfid,
+    device_id: deviceId,
+    remaining_card_balance: remaining,
+    date: dateField ?? null,
+    time: timeField ?? null,
+    litres_consumed: litres,
+    amount_debited: amount,
+    price_per_litre: price,
+    raw: item,
+  };
+};
+
+/** ---------- CRUD endpoints (existing) ---------- */
 
 /**
  * @desc Create a new RFID record (User)
@@ -8,32 +181,22 @@ exports.createRfid = async (req, res) => {
   try {
     const data = req.body || {};
 
-    // Minimal validation
     if (!data.user_name || !data.mobile_no) {
       return res.status(400).json({ message: 'User name and Mobile number are required' });
     }
 
-    // Normalize identifiers to strings to preserve leading zeros
-    if (data.aadhar_no !== undefined && data.aadhar_no !== null)
-      data.aadhar_no = String(data.aadhar_no);
-    if (data.mobile_no !== undefined && data.mobile_no !== null)
-      data.mobile_no = String(data.mobile_no);
+    if (data.aadhar_no !== undefined && data.aadhar_no !== null) data.aadhar_no = String(data.aadhar_no);
+    if (data.mobile_no !== undefined && data.mobile_no !== null) data.mobile_no = String(data.mobile_no);
 
-    // Parse numeric fields safely
     const family_mems = data.family_mems !== undefined ? Number(data.family_mems) : 0;
     const quant_water_alloted_per_day =
-      data.quant_water_alloted_per_day !== undefined
-        ? Number(data.quant_water_alloted_per_day)
-        : 0;
+      data.quant_water_alloted_per_day !== undefined ? Number(data.quant_water_alloted_per_day) : 0;
     const quant_water_alloted_per_month =
-      data.quant_water_alloted_per_month !== undefined
-        ? Number(data.quant_water_alloted_per_month)
-        : 0;
+      data.quant_water_alloted_per_month !== undefined ? Number(data.quant_water_alloted_per_month) : 0;
     const swipe_count = data.swipe_count !== undefined ? Number(data.swipe_count) : 0;
     const total_litres_consumed =
       data.total_litres_consumed !== undefined ? Number(data.total_litres_consumed) : 0;
 
-    // remaining_card_balance: ensure a non-negative number
     let remaining_card_balance = 0;
     if (data.remaining_card_balance !== undefined && data.remaining_card_balance !== null) {
       const n = Number(data.remaining_card_balance);
@@ -49,16 +212,10 @@ exports.createRfid = async (req, res) => {
       aadhar_no: data.aadhar_no || '',
       mobile_no: data.mobile_no,
       family_mems: Number.isNaN(family_mems) ? 0 : family_mems,
-      quant_water_alloted_per_day: Number.isNaN(quant_water_alloted_per_day)
-        ? 0
-        : quant_water_alloted_per_day,
-      quant_water_alloted_per_month: Number.isNaN(quant_water_alloted_per_month)
-        ? 0
-        : quant_water_alloted_per_month,
+      quant_water_alloted_per_day: Number.isNaN(quant_water_alloted_per_day) ? 0 : quant_water_alloted_per_day,
+      quant_water_alloted_per_month: Number.isNaN(quant_water_alloted_per_month) ? 0 : quant_water_alloted_per_month,
       swipe_count: Number.isNaN(swipe_count) ? 0 : swipe_count,
-      total_litres_consumed: Number.isNaN(total_litres_consumed)
-        ? 0
-        : total_litres_consumed,
+      total_litres_consumed: Number.isNaN(total_litres_consumed) ? 0 : total_litres_consumed,
       remaining_card_balance,
       remarks: data.remarks || '',
     });
@@ -67,23 +224,21 @@ exports.createRfid = async (req, res) => {
     return res.status(201).json(saved);
   } catch (err) {
     console.error('createRfid error:', err);
-    if (err.code === 11000) {
-      return res
-        .status(409)
-        .json({ message: 'Duplicate key error', error: err.message });
+    if (err && err.code === 11000) {
+      return res.status(409).json({ message: 'Duplicate key error', error: err.message });
     }
     return res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 
 /**
- * @desc Get all RFID (User) records
+ * @desc Get all RFID (User) records, sorted by most recently updated first
  * @route GET /api/rfid
  */
 exports.getAllRfid = async (req, res) => {
   try {
-    const list = await Rfid.find().sort({ createdAt: -1 }).lean();
-    return res.json(list);
+    const list = await Rfid.find().sort({ updatedAt: -1, createdAt: -1 }).lean();
+    return res.status(200).json(list);
   } catch (err) {
     console.error('getAllRfid error:', err);
     return res.status(500).json({ message: 'Server error' });
@@ -115,28 +270,13 @@ exports.updateRfid = async (req, res) => {
     const id = req.params.id;
     const data = req.body || {};
 
-    if (data.aadhar_no !== undefined && data.aadhar_no !== null)
-      data.aadhar_no = String(data.aadhar_no);
-    if (data.mobile_no !== undefined && data.mobile_no !== null)
-      data.mobile_no = String(data.mobile_no);
+    if (data.aadhar_no !== undefined && data.aadhar_no !== null) data.aadhar_no = String(data.aadhar_no);
+    if (data.mobile_no !== undefined && data.mobile_no !== null) data.mobile_no = String(data.mobile_no);
 
     const updateFields = {};
+    const setters = ['rfid_serial_no','rfid_uid','user_name','address','village','aadhar_no','mobile_no','remarks'];
+    setters.forEach((k) => { if (data[k] !== undefined) updateFields[k] = data[k]; });
 
-    const setters = [
-      'rfid_serial_no',
-      'rfid_uid',
-      'user_name',
-      'address',
-      'village',
-      'aadhar_no',
-      'mobile_no',
-      'remarks',
-    ];
-    setters.forEach((k) => {
-      if (data[k] !== undefined) updateFields[k] = data[k];
-    });
-
-    // numeric fields
     if (data.family_mems !== undefined) {
       const v = Number(data.family_mems);
       updateFields.family_mems = Number.isNaN(v) ? 0 : v;
@@ -158,22 +298,15 @@ exports.updateRfid = async (req, res) => {
       updateFields.total_litres_consumed = Number.isNaN(v) ? 0 : v;
     }
 
-    // remaining_card_balance: validate non-negative
     if (data.remaining_card_balance !== undefined) {
       const v = Number(data.remaining_card_balance);
       if (Number.isNaN(v) || v < 0) {
-        return res
-          .status(400)
-          .json({ message: 'remaining_card_balance must be a non-negative number' });
+        return res.status(400).json({ message: 'remaining_card_balance must be a non-negative number' });
       }
       updateFields.remaining_card_balance = v;
     }
 
-    const updated = await Rfid.findByIdAndUpdate(
-      id,
-      { $set: updateFields },
-      { new: true, runValidators: true }
-    );
+    const updated = await Rfid.findByIdAndUpdate(id, { $set: updateFields }, { new: true, runValidators: true });
 
     if (!updated) return res.status(404).json({ message: 'Record not found' });
     return res.json(updated);
@@ -184,7 +317,7 @@ exports.updateRfid = async (req, res) => {
 };
 
 /**
- * @desc Delete RFID record by ID
+ * @desc Delete RFID record by ID (no history deletion)
  * @route DELETE /api/rfid/:id
  */
 exports.deleteRfid = async (req, res) => {
@@ -192,21 +325,25 @@ exports.deleteRfid = async (req, res) => {
     const id = req.params.id;
     const removed = await Rfid.findByIdAndDelete(id);
     if (!removed) return res.status(404).json({ message: 'Record not found' });
-
-    await RfidHistory.deleteMany({ rfidId: id });
-    return res.json({ message: 'RFID record and history deleted successfully' });
+    return res.json({ message: 'RFID record deleted successfully' });
   } catch (err) {
     console.error('deleteRfid error:', err);
     return res.status(500).json({ message: 'Server error' });
   }
 };
 
+/** ---------- Model-backed history endpoints (if model present) ---------- */
+
 /**
- * @desc Get RFID (User) history
+ * @desc Get RFID (User) history (from RfidHistory model)
  * @route GET /api/rfid/:id/history
  */
 exports.getRfidHistory = async (req, res) => {
   try {
+    if (!RfidHistory) {
+      return res.status(500).json({ message: 'RFID history model not available on server' });
+    }
+
     const id = req.params.id;
     if (!id) return res.status(400).json({ message: 'RFID ID missing' });
 
@@ -243,14 +380,16 @@ exports.getRfidHistory = async (req, res) => {
 };
 
 /**
- * @desc Add a new entry to RFID history
+ * @desc Add a new entry to RFID history (model-backed)
  * @route POST /api/rfid/:id/history
  */
 exports.createRfidHistory = async (req, res) => {
   try {
-    const id = req.params.id;
-    console.log('[createRfidHistory] called for id=', id, 'body=', req.body);
+    if (!RfidHistory) {
+      return res.status(500).json({ message: 'RFID history model not available on server' });
+    }
 
+    const id = req.params.id;
     if (!id) return res.status(400).json({ message: 'RFID ID missing' });
 
     const card = await Rfid.findById(id).lean();
@@ -281,13 +420,76 @@ exports.createRfidHistory = async (req, res) => {
     });
 
     const saved = await newEntry.save();
-    console.log('[createRfidHistory] saved id=', saved._id);
-    return res.status(201).json({
-      message: 'RFID history entry created successfully',
-      data: saved,
-    });
+    return res.status(201).json({ message: 'RFID history entry created successfully', data: saved });
   } catch (err) {
     console.error('[createRfidHistory] error:', err);
+    return res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+/** ---------- Proxy-backed history endpoint (normalized + sorted) ---------- */
+
+/**
+ * @desc Fetch history from device proxy and return normalized, timestamp-sorted results
+ * @route GET /api/rfid/:id/proxy-history
+ */
+exports.getProxyHistory = async (req, res) => {
+  try {
+    const uid = req.params.id;
+    if (!uid) return res.status(400).json({ message: 'RFID UID missing' });
+
+    // prefer an explicit base URL for proxy (set PROXY_BASE_URL in env),
+    // otherwise call the local server's /api/proxy/atw/:uid endpoint
+    const proxyBase = process.env.PROXY_BASE_URL || `${req.protocol}://${req.get('host')}/api/proxy`;
+    const url = `${proxyBase.replace(/\/$/, '')}/atw/${encodeURIComponent(uid)}`;
+
+    const proxRes = await axios.get(url, { timeout: 15000 });
+    const data = proxRes?.data ?? {};
+
+    // extract records array from common shapes
+    let records = [];
+    if (Array.isArray(data.response)) records = data.response;
+    else if (Array.isArray(data)) records = data;
+    else if (Array.isArray(data.data)) records = data.data;
+    else if (Array.isArray(data.items)) records = data.items;
+    else if (data && typeof data === 'object') {
+      const arr = Object.values(data).find((v) => Array.isArray(v));
+      records = arr || [];
+    }
+
+    // normalize and compute timestamps
+    const normalized = records.map((r) => {
+      const norm = normalizeProxyRecord(r);
+      const ts = parseRecordTimestamp(r); // Date or null
+      return {
+        ...norm,
+        timestamp: ts ? ts.toISOString() : null,
+      };
+    });
+
+    // sort newest first (items with no timestamp go to the end)
+    normalized.sort((a, b) => {
+      const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return tb - ta;
+    });
+
+    return res.status(200).json({
+      message: 'Proxy history fetched and normalized',
+      count: normalized.length,
+      data: normalized,
+    });
+  } catch (err) {
+    console.error('getProxyHistory error:', err);
+    if (err.response) {
+      return res.status(err.response.status || 502).json({
+        message: 'Proxy/device returned an error',
+        proxyError: err.response.data,
+      });
+    }
+    if (err.request) {
+      return res.status(504).json({ message: 'No response from proxy/device' });
+    }
     return res.status(500).json({ message: 'Server error', error: err.message });
   }
 };

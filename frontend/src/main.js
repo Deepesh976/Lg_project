@@ -15,7 +15,7 @@ import EditDevice from './pages/editDevice';
 import User from './pages/user';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
-axios.defaults.baseURL = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
+axios.defaults.baseURL = process.env.REACT_APP_API_BASE || 'http://192.168.0.126:5000';
 
 const WithNavbar = ({ Component }) => (
   <>
