@@ -1,6 +1,8 @@
+// src/pages/rfidcard.js
 import React, { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import "../styles/pages.css";
 
 function RfidCard() {
   const navigate = useNavigate();
@@ -8,121 +10,6 @@ function RfidCard() {
   const [filteredRecords, setFilteredRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-
-  const styles = {
-    page: {
-      padding: "20px",
-      background: "#f5f7fb",
-      minHeight: "100vh",
-      fontFamily: "Segoe UI, Roboto, Helvetica, Arial, sans-serif",
-    },
-    container: { maxWidth: "1300px", margin: "0 auto" }, // increased container width
-    card: {
-      background: "#ffffff",
-      borderRadius: 12,
-      padding: 20,
-      boxShadow: "0 6px 18px rgba(20,30,60,0.06)",
-      marginTop: 18,
-    },
-    header: {
-      display: "flex",
-      alignItems: "center",
-      gap: 12,
-      marginBottom: 18,
-      flexWrap: "wrap",
-    },
-    headerLeft: { display: "flex", gap: 8, alignItems: "center", flex: 1 },
-    headerCenter: { display: "flex", justifyContent: "center", flex: 1 },
-    headerRight: { display: "flex", justifyContent: "flex-end", gap: 8, flex: 1 },
-    title: {
-      fontSize: 22,
-      fontWeight: 700,
-      color: "#1f2937",
-      margin: 0,
-      letterSpacing: 0.3,
-    },
-    searchBox: {
-      padding: "8px 12px",
-      borderRadius: 8,
-      border: "1px solid #d1d5db",
-      minWidth: 260,
-      outline: "none",
-      fontSize: 14,
-    },
-    downloadBtn: {
-      background: "#0b74ff",
-      color: "#fff",
-      border: "none",
-      padding: "9px 14px",
-      borderRadius: 8,
-      cursor: "pointer",
-      fontWeight: 600,
-    },
-    tableWrap: {
-      overflowX: "auto",
-      borderRadius: 8,
-      border: "1px solid #e6e8ea",
-    },
-    table: {
-      width: "100%",
-      borderCollapse: "collapse",
-      minWidth: 900, // increased minWidth for more space per column
-    },
-    thead: { background: "#0b74ff", color: "#fff" },
-    th: {
-      padding: "1px 1px",
-      textAlign: "center",
-      fontWeight: 800,
-      fontSize: 14,
-      borderRight: "1px solid rgba(255,255,255,0.12)",
-      whiteSpace: "normal",
-      overflowWrap: "break-word",
-      wordBreak: "break-word",
-      minWidth: 110, // each column slightly wider
-    },
-    td: {
-      padding: "12px 10px",
-      textAlign: "center",
-      color: "#111827",
-      fontSize: 14,
-      borderBottom: "1px solid #f1f5f9",
-      whiteSpace: "normal",
-      overflowWrap: "break-word",
-      wordBreak: "break-word",
-      minWidth: 100,
-    },
-    rowEven: { background: "#fff" },
-    rowOdd: { background: "#fbfdff" },
-    clickableRfid: {
-      color: "#0b74ff",
-      cursor: "pointer",
-      background: "transparent",
-      border: "none",
-      padding: "6px 8px",
-      fontSize: "inherit",
-      fontWeight: 700,
-      borderRadius: 8,
-    },
-    actionBtn: {
-      padding: "6px 10px",
-      borderRadius: 6,
-      border: "none",
-      cursor: "pointer",
-      fontWeight: 700,
-    },
-    editBtn: { background: "#10b981", color: "#fff", marginRight: 6 },
-    delBtn: { background: "#ef4444", color: "#fff" },
-    emptyRow: {
-      padding: 28,
-      textAlign: "center",
-      color: "#6b7280",
-      fontStyle: "italic",
-    },
-    disabledBtn: {
-      opacity: 0.6,
-      cursor: "not-allowed",
-    },
-  };
 
   const columns = [
     "S.No",
@@ -212,6 +99,7 @@ function RfidCard() {
   };
 
   const handleViewHistory = (rec) => {
+    // prefer rfid_uid (non-empty) otherwise fallback to _id
     const uid =
       rec && rec.rfid_uid && String(rec.rfid_uid).trim() !== ""
         ? rec.rfid_uid
@@ -275,42 +163,41 @@ function RfidCard() {
   };
 
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <div style={styles.card}>
-          <div style={styles.header}>
-            <div style={styles.headerLeft}>
+    <div className="page-wrapper">
+      <div className="page-container">
+        <div className="card-panel">
+          <div className="page-header">
+            <div className="header-left">
               <input
+                className="search-input"
                 placeholder="🔍 Search by name, mobile, village, RFID UID or Serial No..."
                 value={searchQuery}
                 onChange={handleSearch}
-                style={styles.searchBox}
               />
             </div>
 
-            <div style={styles.headerCenter}>
-              <h2 style={styles.title}>Registered RFID Users</h2>
+            <div className="header-center">
+              <h2 className="page-title">Registered RFID Users</h2>
             </div>
 
-            <div style={styles.headerRight}>
+            <div className="header-right">
               <button
-                style={styles.downloadBtn}
+                className="btn btn-primary btn-small"
                 onClick={handleDownload}
                 disabled={loading}
               >
-                ⬇️ Download CSV
+                <i className="fas fa-download"></i>
+                Download CSV
               </button>
             </div>
           </div>
 
-          <div style={styles.tableWrap}>
-            <table style={styles.table}>
-              <thead style={styles.thead}>
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
                 <tr>
                   {columns.map((h) => (
-                    <th key={h} style={styles.th}>
-                      {h}
-                    </th>
+                    <th key={h}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -318,57 +205,58 @@ function RfidCard() {
               <tbody>
                 {!filteredRecords || filteredRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={columns.length} style={styles.emptyRow}>
+                    <td colSpan={columns.length} className="table-empty">
                       {loading ? "Loading records..." : "No records found"}
                     </td>
                   </tr>
                 ) : (
-                  filteredRecords.map((r, i) => {
-                    const rowStyle = i % 2 === 0 ? styles.rowEven : styles.rowOdd;
-                    return (
-                      <tr key={r._id || i} style={rowStyle}>
-                        <td style={styles.td}>{i + 1}</td>
-                        <td style={styles.td}>{r.rfid_serial_no || "—"}</td>
-                        <td style={styles.td}>
+                  filteredRecords.map((r, i) => (
+                    <tr key={r._id || i}>
+                      <td>{i + 1}</td>
+                      <td>{r.rfid_serial_no || "—"}</td>
+                      <td>
+                        <button
+                          className="btn-link"
+                          onClick={() => handleViewHistory(r)}
+                          title="View history for this RFID UID"
+                        >
+                          {r.rfid_uid || "—"}
+                        </button>
+                      </td>
+                      <td>{r.user_name || "—"}</td>
+                      <td>{r.address || "—"}</td>
+                      <td>{r.village || "—"}</td>
+                      <td>{r.aadhar_no || "—"}</td>
+                      <td>{r.mobile_no || "—"}</td>
+                      <td>{r.family_mems ?? "—"}</td>
+                      <td>{r.quant_water_alloted_per_day ?? "—"}</td>
+                      <td>{r.quant_water_alloted_per_month ?? "—"}</td>
+                      <td>{r.swipe_count ?? "—"}</td>
+                      <td>{r.total_litres_consumed ?? "—"}</td>
+                      <td>{r.remaining_card_balance ?? "—"}</td>
+                      <td>{r.remarks || "—"}</td>
+                      <td>
+                        <div className="action-buttons">
                           <button
-                            onClick={() => handleViewHistory(r)}
-                            style={styles.clickableRfid}
-                            title="View history for this RFID UID"
-                          >
-                            {r.rfid_uid || "—"}
-                          </button>
-                        </td>
-                        <td style={styles.td}>{r.user_name || "—"}</td>
-                        <td style={styles.td}>{r.address || "—"}</td>
-                        <td style={styles.td}>{r.village || "—"}</td>
-                        <td style={styles.td}>{r.aadhar_no || "—"}</td>
-                        <td style={styles.td}>{r.mobile_no || "—"}</td>
-                        <td style={styles.td}>{r.family_mems ?? "—"}</td>
-                        <td style={styles.td}>{r.quant_water_alloted_per_day ?? "—"}</td>
-                        <td style={styles.td}>{r.quant_water_alloted_per_month ?? "—"}</td>
-                        <td style={styles.td}>{r.swipe_count ?? "—"}</td>
-                        <td style={styles.td}>{r.total_litres_consumed ?? "—"}</td>
-                        <td style={styles.td}>{r.remaining_card_balance ?? "—"}</td>
-                        <td style={styles.td}>{r.remarks || "—"}</td>
-                        <td style={styles.td}>
-                          <button
-                            style={{ ...styles.actionBtn, ...styles.editBtn }}
+                            className="btn btn-success btn-small"
                             onClick={() => handleEditNavigate(r)}
                             disabled={loading}
                           >
+                            <i className="fas fa-edit"></i>
                             Edit
                           </button>
                           <button
-                            style={{ ...styles.actionBtn, ...styles.delBtn }}
+                            className="btn btn-danger btn-small"
                             onClick={() => handleDelete(r._id)}
                             disabled={loading}
                           >
+                            <i className="fas fa-trash"></i>
                             Delete
                           </button>
-                        </td>
-                      </tr>
-                    );
-                  })
+                        </div>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>

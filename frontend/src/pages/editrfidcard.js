@@ -1,4 +1,4 @@
-// frontend/src/pages/editrfidcard.js
+// src/pages/editrfidcard.js
 import React, { useEffect, useState } from "react";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -42,9 +42,10 @@ function EditRfidCard() {
     remarks: "",
   });
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Label map for display
   const labels = {
     rfid_serial_no: "RFID Card Serial Number",
     rfid_uid: "RFID UID",
@@ -62,8 +63,10 @@ function EditRfidCard() {
     remarks: "Remarks / Notes",
   };
 
+  // Fetch record on mount or prefill from navigation state (but only allowed fields)
   useEffect(() => {
     if (state && typeof state === "object" && Object.keys(state).length) {
+      // filter the incoming state to only allowed fields (prevents copying _id, __v, createdAt, allotment, etc.)
       const filtered = {};
       allowedFields.forEach((k) => {
         if (state[k] !== undefined) filtered[k] = state[k];
@@ -83,13 +86,13 @@ function EditRfidCard() {
       return;
     }
     try {
-      setError("");
       setLoading(true);
       const res = await axios.get(`/api/rfid/${id}`);
       if (!res?.data) {
         setError("Record not found.");
       } else {
         const d = res.data;
+        // Map only the allowed fields explicitly (ignore _id, createdAt, updatedAt, __v, allotment)
         setForm({
           rfid_serial_no: d.rfid_serial_no || "",
           rfid_uid: d.rfid_uid || "",
@@ -124,6 +127,8 @@ function EditRfidCard() {
     e.preventDefault();
     try {
       setLoading(true);
+
+      // Prepare payload with proper number conversions (only allowed fields)
       const payload = {
         rfid_serial_no: (form.rfid_serial_no || "").trim(),
         rfid_uid: (form.rfid_uid || "").trim(),
@@ -141,18 +146,18 @@ function EditRfidCard() {
         remarks: (form.remarks || "").trim(),
       };
 
-      const putRes = await axios.put(`/api/rfid/${id}`, payload);
-      console.log("Update response:", putRes);
+      await axios.put(`/api/rfid/${id}`, payload);
       alert("RFID record updated successfully!");
       navigate("/rfidcard");
     } catch (err) {
       console.error("Update error:", err);
-      alert("Failed to update record. " + (err.response?.data?.message || err.message));
+      alert("Failed to update record.");
     } finally {
       setLoading(false);
     }
   };
 
+  // === Styles ===
   const styles = {
     container: {
       padding: "20px",
@@ -211,7 +216,7 @@ function EditRfidCard() {
     <div style={styles.container}>
       <h2 style={{ textAlign: "center" }}>Edit RFID Record</h2>
 
-      {loading && <div style={{ textAlign: "center" }}>Loading...</div>}
+      {loading && <div style={{ textAlign: "center" }}>Loading record...</div>}
 
       {!loading && error && <div style={styles.error}>{error}</div>}
 
@@ -246,7 +251,7 @@ function EditRfidCard() {
 
           <div style={styles.actions}>
             <button type="submit" style={styles.btnPrimary} disabled={loading}>
-              {loading ? "Processing..." : "Update Record"}
+              {loading ? "Updating..." : "Update Record"}
             </button>
           </div>
         </form>

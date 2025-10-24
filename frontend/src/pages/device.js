@@ -2,112 +2,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useNavigate, useLocation } from 'react-router-dom';
-
-const styles = {
-  container: { display: 'flex', justifyContent: 'center', padding: 20 },
-  card: {
-    width: '100%',
-    maxWidth: 1100,
-    background: '#fff',
-    padding: 16,
-    borderRadius: 10,
-    boxShadow: '0 6px 18px rgba(0,0,0,0.06)',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  headerLeft: { display: 'flex', alignItems: 'center', gap: 8, flex: 1 },
-  headerCenter: {
-    flex: 1,
-    display: 'flex',
-    justifyContent: 'center',
-    textAlign: 'center',
-  },
-  headerRight: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: 8,
-    flex: 1,
-  },
-  title: {
-    fontSize: 25,
-    fontWeight: 800,
-    color: '#000',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  search: {
-    padding: 8,
-    borderRadius: 8,
-    border: '1px solid #ddd',
-    minWidth: 220,
-  },
-  tableWrap: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse' },
-  th: {
-    textAlign: 'left',
-    padding: 10,
-    borderBottom: '1px solid #eee',
-    whiteSpace: 'nowrap',
-  },
-  td: {
-    padding: 10,
-    borderBottom: '1px solid #f7f7f7',
-    verticalAlign: 'top',
-  },
-  wrapCell: { maxWidth: 260, wordBreak: 'break-word', whiteSpace: 'normal' },
-  button: {
-    padding: '8px 12px',
-    borderRadius: 8,
-    border: 'none',
-    cursor: 'pointer',
-  },
-  addBtn: {
-    padding: '8px 12px',
-    borderRadius: 8,
-    border: 'none',
-    cursor: 'pointer',
-    background: '#0b74ff',
-    color: '#fff',
-    fontWeight: 700,
-  },
-  downloadBtn: {
-    padding: '8px 12px',
-    borderRadius: 8,
-    border: '1px solid #e6eefc',
-    cursor: 'pointer',
-    background: '#fff',
-    color: '#0b74ff',
-    fontWeight: 700,
-  },
-  editBtn: {
-    padding: '6px 10px',
-    borderRadius: 6,
-    border: 'none',
-    cursor: 'pointer',
-    background: '#10b981',
-    color: '#fff',
-  },
-  delBtn: {
-    padding: '6px 10px',
-    borderRadius: 6,
-    border: 'none',
-    cursor: 'pointer',
-    background: '#ef4444',
-    color: '#fff',
-  },
-  statusBadge: {
-    padding: '4px 8px',
-    borderRadius: 6,
-    fontWeight: 600,
-    fontSize: 12,
-  },
-};
+import '../styles/pages.css';
 
 function formatNumber(n, decimals = 2) {
   if (n === undefined || n === null || Number.isNaN(Number(n))) return '—';
@@ -256,147 +151,144 @@ export default function Device() {
     URL.revokeObjectURL(url);
   };
 
+  function getStatusBadgeClass(status) {
+    const s = (status || '').toUpperCase();
+    if (s === 'ACTIVE') return 'status-active';
+    if (s === 'MAINTENANCE') return 'status-maintenance';
+    if (s === 'INACTIVE') return 'status-inactive';
+    return 'status-pending';
+  }
+
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        {/* Header layout: Left (Search), Center (Heading), Right (Buttons) */}
-        <div style={styles.header}>
-          <div style={styles.headerLeft}>
-            <input
-              style={styles.search}
-              placeholder="Search device id or location"
-              value={q}
-              onChange={onSearch}
-            />
-          </div>
-
-          <div style={styles.headerCenter}>
-            <h2 style={styles.title}>Devices</h2>
-          </div>
-
-          <div style={styles.headerRight}>
-            <button style={styles.downloadBtn} onClick={handleDownload} disabled={loading}>
-              ⬇️ Download
-            </button>
-            <button style={styles.addBtn} onClick={handleAdd}>
-              + Add Device
-            </button>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div style={styles.tableWrap}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>S.No</th>
-                <th style={styles.th}>Device Id</th>
-                <th style={styles.th}>Location</th>
-                <th style={styles.th}>Price per litre</th>
-                <th style={styles.th}>Total (L)</th>
-                <th style={styles.th}>Status</th>
-                <th style={styles.th}>Last Update</th>
-                <th style={styles.th}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {device.length === 0 ? (
-                <tr>
-                  <td style={{ ...styles.td, textAlign: 'center' }} colSpan={8}>
-                    {loading ? 'Loading devices...' : 'No devices found'}
-                  </td>
-                </tr>
-              ) : (
-                device.map((d, idx) => {
-                  const serial = (page - 1) * limit + idx + 1;
-                  const last = d.last_update || d.updatedAt || d.updated_at;
-                  const lastStr = last ? new Date(last).toLocaleString() : '—';
-                  const price = d.price_per_ltr ?? d.price_per_litre;
-                  const priceStr = price !== undefined ? formatNumber(price, 2) : '—';
-                  const totalLitres =
-                    d.total_dispensed_litres !== undefined
-                      ? formatNumber(d.total_dispensed_litres, 2)
-                      : '—';
-                  const stat = d.status || '—';
-                  return (
-                    <tr key={d._id || idx}>
-                      <td style={styles.td}>{serial}</td>
-                      <td style={{ ...styles.td, ...styles.wrapCell }}>
-                        {d.device_id || '—'}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.wrapCell }}>
-                        {d.location || '—'}
-                      </td>
-                      <td style={styles.td}>{priceStr}</td>
-                      <td style={styles.td}>{totalLitres}</td>
-                      <td style={styles.td}>
-                        <span
-                          style={{ ...styles.statusBadge, ...statusStyle(stat) }}
-                        >
-                          {stat}
-                        </span>
-                      </td>
-                      <td style={styles.td}>{lastStr}</td>
-                      <td style={styles.td}>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button
-                            style={styles.editBtn}
-                            onClick={() => handleEdit(d._id)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            style={styles.delBtn}
-                            onClick={() => handleDelete(d._id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div
-          style={{
-            marginTop: 12,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <div>
-            Showing {device.length} of {total}
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button
-              style={styles.button}
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Prev
-            </button>
-            <div
-              style={{
-                padding: '8px 12px',
-                border: '1px solid #eee',
-                borderRadius: 8,
-              }}
-            >
-              {page}
+    <div className="page-wrapper">
+      <div className="page-container">
+        <div className="card-panel">
+          <div className="page-header">
+            <div className="header-left">
+              <input
+                className="search-input"
+                placeholder="Search device id or location"
+                value={q}
+                onChange={onSearch}
+              />
             </div>
-            <button
-              style={styles.button}
-              disabled={page * limit >= total}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </button>
+
+            <div className="header-center">
+              <h2 className="page-title">Devices</h2>
+            </div>
+
+            <div className="header-right">
+              <button
+                className="btn btn-secondary btn-small"
+                onClick={handleDownload}
+                disabled={loading}
+              >
+                <i className="fas fa-download"></i>
+                Download
+              </button>
+              <button
+                className="btn btn-primary btn-small"
+                onClick={handleAdd}
+              >
+                <i className="fas fa-plus"></i>
+                Add Device
+              </button>
+            </div>
+          </div>
+
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>S.No</th>
+                  <th>Device Id</th>
+                  <th>Location</th>
+                  <th>Price per litre</th>
+                  <th>Total (L)</th>
+                  <th>Status</th>
+                  <th>Last Update</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {device.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="table-empty">
+                      {loading ? 'Loading devices...' : 'No devices found'}
+                    </td>
+                  </tr>
+                ) : (
+                  device.map((d, idx) => {
+                    const serial = (page - 1) * limit + idx + 1;
+                    const last = d.last_update || d.updatedAt || d.updated_at;
+                    const lastStr = last ? new Date(last).toLocaleString() : '—';
+                    const price = d.price_per_ltr ?? d.price_per_litre;
+                    const priceStr = price !== undefined ? formatNumber(price, 2) : '—';
+                    const totalLitres =
+                      d.total_dispensed_litres !== undefined
+                        ? formatNumber(d.total_dispensed_litres, 2)
+                        : '—';
+                    const stat = d.status || '—';
+                    return (
+                      <tr key={d._id || idx}>
+                        <td>{serial}</td>
+                        <td>{d.device_id || '—'}</td>
+                        <td>{d.location || '—'}</td>
+                        <td>{priceStr}</td>
+                        <td>{totalLitres}</td>
+                        <td>
+                          <span className={`status-badge ${getStatusBadgeClass(stat)}`}>
+                            {stat}
+                          </span>
+                        </td>
+                        <td>{lastStr}</td>
+                        <td>
+                          <div className="action-buttons">
+                            <button
+                              className="btn btn-success btn-small"
+                              onClick={() => handleEdit(d._id)}
+                            >
+                              <i className="fas fa-edit"></i>
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-danger btn-small"
+                              onClick={() => handleDelete(d._id)}
+                            >
+                              <i className="fas fa-trash"></i>
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pagination-container">
+            <div className="pagination-info">
+              Showing {device.length} of {total}
+            </div>
+            <div className="pagination-controls">
+              <button
+                className="pagination-btn"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <i className="fas fa-chevron-left"></i> Prev
+              </button>
+              <div className="pagination-page">{page}</div>
+              <button
+                className="pagination-btn"
+                disabled={page * limit >= total}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next <i className="fas fa-chevron-right"></i>
+              </button>
+            </div>
           </div>
         </div>
       </div>

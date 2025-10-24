@@ -2,114 +2,163 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const styles = {
+  wrapper: {
+    fontFamily: "'Poppins', sans-serif",
+    backgroundColor: '#f5f7fa',
+    minHeight: '100vh',
+    margin: 0,
+    padding: 0,
+  },
   headerBar: {
     width: '100%',
-    padding: '0.8rem 2rem',
-    background: 'linear-gradient(to right, #3f51b5, #5a55ae)',
+    padding: '1rem 2rem',
+    background: 'linear-gradient(135deg, #3f51b5 0%, #5a55ae 100%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     color: '#fff',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    zIndex: 1000,
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+    position: 'relative',
+    zIndex: 100,
   },
   headerTitle: {
-    fontSize: '1.4rem',
-    fontWeight: 600,
-    fontFamily: "'Poppins', sans-serif",
+    fontSize: 'clamp(1.2rem, 5vw, 1.6rem)',
+    fontWeight: 700,
+    margin: 0,
+    letterSpacing: '0.5px',
   },
-  container: {
-    position: 'relative',
-    width: '100%',
-    height: '100vh',
-    background: 'linear-gradient(to right, #e9efff, #f6f8ff)',
-    overflow: 'hidden',
-    fontFamily: "'Poppins', sans-serif",
-    paddingTop: '70px',
-  },
-  formsContainer: {
-    position: 'absolute',
-    width: '100%',
-    height: 'calc(100% - 150px)',
-    top: '70px',
-    left: 0,
-  },
-  signinSignup: {
-    position: 'absolute',
-    top: '50%',
-    left: '72%',
-    transform: 'translate(-50%, -50%)',
-    width: '40%',
+  mainContainer: {
     display: 'grid',
-    gridTemplateColumns: '1fr',
-    zIndex: 5,
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    minHeight: 'calc(100vh - 70px)',
+    gap: '2rem',
+    padding: '3rem 2rem',
+    maxWidth: '1400px',
+    margin: '0 auto',
   },
-  form: {
+  illustrationSection: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'column',
-    padding: '2rem 3rem',
-    borderRadius: '20px',
+    minHeight: '500px',
+  },
+  illustrationImage: {
+    width: '100%',
+    maxWidth: '600px',
+    height: 'auto',
+    objectFit: 'contain',
+    animation: 'float 3s ease-in-out infinite',
+  },
+  formSection: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  formCard: {
+    width: '100%',
+    maxWidth: '450px',
+    padding: 'clamp(2rem, 5vw, 2.5rem)',
     backgroundColor: '#fff',
-    boxShadow: '0 10px 35px rgba(0,0,0,0.08)',
+    borderRadius: '16px',
+    boxShadow: '0 10px 40px rgba(0, 0, 0, 0.08)',
+    border: '1px solid rgba(63, 81, 181, 0.1)',
   },
   logo: {
-    width: '250px',
-    marginBottom: '1rem',
+    width: '280px',
+    height: '280px',
+    margin: '0 auto 2rem',
     objectFit: 'contain',
+    display: 'block',
   },
-  title: {
-    fontSize: '1.6rem',
-    color: '#333',
-    marginBottom: '1rem',
+  formTitle: {
+    fontSize: 'clamp(1.4rem, 4vw, 1.8rem)',
+    fontWeight: 700,
+    color: '#1a1a2e',
+    margin: '0 0 0.5rem 0',
+    textAlign: 'center',
   },
-  btn: {
-    width: '140px',
-    backgroundColor: '#3f51b5',
-    border: 'none',
-    outline: 'none',
-    height: '45px',
-    borderRadius: '45px',
-    color: '#fff',
-    textTransform: 'uppercase',
-    fontWeight: 600,
-    margin: '20px 0 10px 0',
-    cursor: 'pointer',
+  formSubtitle: {
     fontSize: '0.95rem',
-    transition: 'background 0.3s',
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: '2rem',
   },
-  btnHover: {
-    backgroundColor: '#2c3ea8',
-  },
-  panelsContainer: {
-    position: 'absolute',
-    height: '100%',
-    width: '100%',
-    top: 0,
-    left: 0,
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-  },
-  panel: {
+  formGroup: {
+    marginBottom: '1.5rem',
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    textAlign: 'center',
-    zIndex: 6,
   },
-  leftPanel: {
-    pointerEvents: 'all',
-    padding: '2rem 10% 1rem 8%',
+  label: {
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    color: '#333',
+    marginBottom: '0.5rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
   },
-  image: {
+  iconLabel: {
+    fontSize: '1rem',
+    color: '#3f51b5',
+  },
+  inputField: {
     width: '100%',
-    maxWidth: '4180px',
+    padding: '0.75rem 1rem',
+    fontSize: '1rem',
+    border: '2px solid #e0e0e0',
+    borderRadius: '8px',
+    transition: 'all 0.3s ease',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  },
+  inputFieldFocus: {
+    borderColor: '#3f51b5',
+    boxShadow: '0 0 0 3px rgba(63, 81, 181, 0.1)',
+  },
+  submitBtn: {
+    width: '100%',
+    padding: '0.85rem 1rem',
+    backgroundColor: 'linear-gradient(135deg, #3f51b5 0%, #5a55ae 100%)',
+    border: 'none',
+    outline: 'none',
+    borderRadius: '8px',
+    color: '#fff',
+    textTransform: 'uppercase',
+    fontWeight: 700,
+    fontSize: '1rem',
+    letterSpacing: '0.5px',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    boxShadow: '0 4px 15px rgba(63, 81, 181, 0.3)',
     marginTop: '1rem',
+  },
+  submitBtnHover: {
+    transform: 'translateY(-2px)',
+    boxShadow: '0 6px 20px rgba(63, 81, 181, 0.4)',
+  },
+  checkboxGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    fontSize: '0.9rem',
+    color: '#666',
+  },
+  checkboxInput: {
+    cursor: 'pointer',
+    width: '18px',
+    height: '18px',
+    accentColor: '#3f51b5',
+  },
+  rememberLabel: {
+    cursor: 'pointer',
+  },
+  '@keyframes float': {
+    '0%, 100%': {
+      transform: 'translateY(0px)',
+    },
+    '50%': {
+      transform: 'translateY(-20px)',
+    },
   },
 };
 
@@ -119,14 +168,140 @@ const Login = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    // Add authentication logic here
     navigate('/rfidcard', { replace: true });
   };
 
   return (
     <>
+      <style>{`
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-20px);
+          }
+        }
+
+        @media (max-width: 768px) {
+          body {
+            overflow-x: hidden;
+          }
+        }
+
+        /* Tablet and below */
+        @media (max-width: 1024px) {
+          .login-main-container {
+            grid-template-columns: 1fr;
+            padding: 2rem 1.5rem;
+            gap: 2rem;
+          }
+
+          .login-illustration-section {
+            min-height: 300px;
+            order: 2;
+          }
+
+          .login-form-section {
+            order: 1;
+          }
+
+          .login-form-card {
+            max-width: 100%;
+          }
+        }
+
+        /* Mobile */
+        @media (max-width: 640px) {
+          .login-main-container {
+            padding: 1.5rem 1rem;
+            gap: 1.5rem;
+            min-height: auto;
+          }
+
+          .login-header-title {
+            font-size: 1.2rem;
+          }
+
+          .login-form-card {
+            padding: 1.5rem;
+            border-radius: 12px;
+          }
+
+          .login-logo {
+            width: 200px;
+            height: 200px;
+            margin-bottom: 1.5rem;
+          }
+
+          .login-form-title {
+            font-size: 1.4rem;
+          }
+
+          .login-illustration-image {
+            max-width: 100%;
+            height: auto;
+          }
+
+          .login-input-field {
+            font-size: 16px;
+            padding: 0.7rem 0.9rem;
+          }
+
+          .login-submit-btn {
+            padding: 0.75rem 0.9rem;
+            font-size: 0.95rem;
+          }
+        }
+
+        /* Extra small devices */
+        @media (max-width: 480px) {
+          .login-main-container {
+            padding: 1rem;
+            gap: 1rem;
+          }
+
+          .login-form-card {
+            padding: 1.25rem;
+          }
+
+          .login-illustration-section {
+            min-height: 250px;
+            margin-bottom: 1rem;
+          }
+
+          .login-logo {
+            width: 160px;
+            height: 160px;
+          }
+        }
+
+        .login-submit-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(63, 81, 181, 0.4);
+        }
+
+        .login-submit-btn:active {
+          transform: translateY(0);
+        }
+
+        .login-submit-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
+        }
+      `}</style>
+
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap"
       />
       <link
         rel="stylesheet"
@@ -135,35 +310,63 @@ const Login = () => {
         referrerPolicy="no-referrer"
       />
 
-      <div style={styles.headerBar}>
-        <h1 style={styles.headerTitle}>LG PROJECT</h1>
-      </div>
+      <div style={styles.wrapper}>
+        <header style={styles.headerBar}>
+          <h1 style={styles.headerTitle} className="login-header-title">
+            LG PROJECT
+          </h1>
+        </header>
 
-      <div style={styles.container}>
-        <div style={styles.formsContainer}>
-          <div style={styles.signinSignup}>
-            <form style={styles.form} onSubmit={handleSubmit}>
-              <img src="/logo.png" alt="Logo" style={styles.logo} />
-              <h2 style={styles.title}>User Login</h2>
+        <main style={styles.mainContainer} className="login-main-container">
+          {/* Illustration Section */}
+          <section style={styles.illustrationSection} className="login-illustration-section">
+            <img
+              src="/log.svg"
+              alt="Login Illustration"
+              style={styles.illustrationImage}
+              className="login-illustration-image"
+            />
+          </section>
 
-              {/* ✅ Only Login button now */}
-              <button
-                type="submit"
-                style={{ ...styles.btn, ...(btnHover ? styles.btnHover : {}) }}
-                onMouseEnter={() => setBtnHover(true)}
-                onMouseLeave={() => setBtnHover(false)}
-              >
-                Login
-              </button>
-            </form>
-          </div>
-        </div>
+          {/* Form Section */}
+          <section style={styles.formSection} className="login-form-section">
+            <div style={styles.formCard} className="login-form-card">
+              <img
+                src="/logo.png"
+                alt="Company Logo"
+                style={styles.logo}
+                className="login-logo"
+              />
 
-        <div style={styles.panelsContainer}>
-          <div style={{ ...styles.panel, ...styles.leftPanel }}>
-            <img src="/log.svg" style={styles.image} alt="Login Visual" />
-          </div>
-        </div>
+              <h2 style={styles.formTitle} className="login-form-title">
+                Welcome Back
+              </h2>
+              <p style={styles.formSubtitle}>
+                Sign in to access your account
+              </p>
+
+              <form onSubmit={handleSubmit}>
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  style={{
+                    ...styles.submitBtn,
+                    ...(btnHover ? styles.submitBtnHover : {}),
+                    background: btnHover
+                      ? 'linear-gradient(135deg, #2c3ea8 0%, #3d4888 100%)'
+                      : 'linear-gradient(135deg, #3f51b5 0%, #5a55ae 100%)',
+                  }}
+                  className="login-submit-btn"
+                  onMouseEnter={() => setBtnHover(true)}
+                  onMouseLeave={() => setBtnHover(false)}
+                >
+                  <i className="fas fa-sign-in-alt" style={{ marginRight: '0.5rem' }}></i>
+                  Sign In
+                </button>
+              </form>
+            </div>
+          </section>
+        </main>
       </div>
     </>
   );

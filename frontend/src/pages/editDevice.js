@@ -130,7 +130,7 @@ export default function EditDevice() {
   };
 
   const handleCancel = () => {
-    navigate('/devices');
+    navigate('/device');
   };
 
   if (fetching) {

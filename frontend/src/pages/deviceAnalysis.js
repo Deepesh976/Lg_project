@@ -1,9 +1,9 @@
-// src/components/DeviceAnalysis.jsx
+// src/pages/deviceAnalysis.js
 import React, { useEffect, useState, useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import axios from "axios";
 import Select from "react-select";
-import "../styles/admin.css";
+import "../styles/pages.css";
 
 const API_BASE = process.env.REACT_APP_API_BASE || "http://127.0.0.1:5000";
 
@@ -153,20 +153,22 @@ const AtwCard = ({ role, node, loading }) => {
   };
 
   const fieldBox = {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
+    background: "#f9fafc",
+    border: "2px solid #e5e7eb",
     borderRadius: 8,
-    padding: "10px 12px",
+    padding: "12px 1rem",
     display: "flex",
     flexDirection: "column",
     gap: 6,
+    transition: "all 0.2s ease",
   };
 
   return (
-    <div className="card" style={{ padding: 16, marginTop: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+    <div className="card-panel" style={{ padding: 0, overflow: "visible" }}>
+      <div style={{ padding: "1rem 1.5rem", borderBottom: "2px solid #f0f2f5", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
         <div>
-          <h4 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+          <h4 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, fontSize: "1.1rem", fontWeight: 700, color: "#1f2937" }}>
+            <i className="fas fa-microchip" style={{ color: "#3f51b5" }}></i>
             {role}
             <span style={{ fontSize: 12, color: "#6b7280" }}>{machineIdVal !== "—" ? machineIdVal : ""}</span>
             {pick(["status"], null) && <StatusBadge status={pick(["status"])} />}
@@ -174,7 +176,7 @@ const AtwCard = ({ role, node, loading }) => {
         </div>
       </div>
 
-      <div style={gridStyle}>
+      <div style={{ ...gridStyle, padding: "1.5rem" }}>
         {fields.map((f) => (
           <div key={f.label} style={fieldBox}>
             <div style={{ fontSize: 11, color: "#6b7280" }}>{f.label.replace(/_/g, " ")}</div>
@@ -265,48 +267,55 @@ const DeviceAnalysis = () => {
   const atw3 = getRoleNode("ATW3");
 
   return (
-    <div className="page-shell">
-      <div className="container-narrow">
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", position: "relative", marginBottom: 20 }}>
-          <h1 style={{ margin: 0, textAlign: "center", color: "#1f2937" }}>Device Analysis Dashboard</h1>
+    <div className="page-wrapper">
+      <div className="page-container">
+        <div className="card-panel" style={{ padding: 0 }}>
+          <div className="page-header" style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "2rem", padding: "1.5rem" }}>
+            <div>
+              <h1 className="page-title">Device Analysis Dashboard</h1>
+            </div>
 
-          <div style={{ position: "absolute", right: 0, top: 0, minWidth: 320 }}>
-            <Select
-              options={setupOptions}
-              value={selectedSetup}
-              onChange={(val) => {
-                setSelectedSetup(val);
-              }}
-              placeholder={loadingSetups ? "Loading setup IDs..." : "Select Setup ID..."}
-              isClearable
-              styles={{
-                control: (base) => ({
-                  ...base,
-                  minHeight: 40,
-                  borderRadius: 8,
-                  border: "2px solid #e5e7eb",
-                  boxShadow: "none",
-                }),
-                menu: (base) => ({ ...base, zIndex: 9999 }),
-              }}
-              noOptionsMessage={() => (loadingSetups ? "Loading..." : "No setups found")}
-            />
+            <div style={{ minWidth: 320 }}>
+              <Select
+                options={setupOptions}
+                value={selectedSetup}
+                onChange={(val) => {
+                  setSelectedSetup(val);
+                }}
+                placeholder={loadingSetups ? "Loading setup IDs..." : "Select Setup ID..."}
+                isClearable
+                styles={{
+                  control: (base) => ({
+                    ...base,
+                    minHeight: 40,
+                    borderRadius: 8,
+                    border: "2px solid #e5e7eb",
+                    boxShadow: "none",
+                    fontFamily: "inherit",
+                  }),
+                  menu: (base) => ({ ...base, zIndex: 9999 }),
+                }}
+                noOptionsMessage={() => (loadingSetups ? "Loading..." : "No setups found")}
+              />
+            </div>
           </div>
-        </div>
 
-        {error && (
-          <div style={{ marginBottom: 16, color: "#b91c1c", background: "#fee2e2", padding: 12, borderRadius: 8, border: "1px solid #fca5a5" }}>
-            {error}
+          {error && (
+            <div className="error-message" style={{ margin: "1rem" }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ padding: "1.5rem", borderTop: "2px solid #f0f2f5" }}>
+            <h3 style={{ marginBottom: 16, color: "#1f2937", fontSize: "1.25rem", fontWeight: 700 }}>
+              <i className="fas fa-water"></i> ATW Systems (Automatic Water Dispensers)
+            </h3>
+            <div style={{ display: "grid", gap: "1.5rem" }}>
+              <AtwCard role="ATW1" node={atw1} loading={loadingMetrics} />
+              <AtwCard role="ATW2" node={atw2} loading={loadingMetrics} />
+              <AtwCard role="ATW3" node={atw3} loading={loadingMetrics} />
+            </div>
           </div>
-        )}
-
-        {/* ATW Systems */}
-        <div style={{ marginTop: 8 }}>
-          <h3 style={{ marginBottom: 16, color: "#1f2937" }}>ATW Systems (Automatic Water Dispensers)</h3>
-          <AtwCard role="ATW1" node={atw1} loading={loadingMetrics} />
-          <AtwCard role="ATW2" node={atw2} loading={loadingMetrics} />
-          <AtwCard role="ATW3" node={atw3} loading={loadingMetrics} />
         </div>
       </div>
     </div>
