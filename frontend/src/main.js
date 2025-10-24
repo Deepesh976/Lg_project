@@ -1,4 +1,4 @@
-// App.js
+// src/App.js
 import React from 'react';
 import axios from 'axios';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
@@ -14,8 +14,16 @@ import AddDevice from './pages/addDevice';
 import EditDevice from './pages/editDevice';
 import User from './pages/user';
 import '@fortawesome/fontawesome-free/css/all.min.css';
+import ProtectedRoutes from './components/auth/protectedRoutes'; // ensure path matches
+// Note: if you placed protectedRoutes.js under src/components, import from './components/protectedRoutes'
 
 axios.defaults.baseURL = process.env.REACT_APP_API_BASE || 'http://192.168.0.126:5000';
+
+// if there's a token already (page refresh), attach it to axios header
+const existingToken = localStorage.getItem('lg_admin_token');
+if (existingToken) {
+  axios.defaults.headers.common['Authorization'] = `Bearer ${existingToken}`;
+}
 
 const WithNavbar = ({ Component }) => (
   <>
@@ -35,34 +43,27 @@ export default function App() {
         crossOrigin="anonymous"
         referrerPolicy="no-referrer"
       />
+
       <Routes>
-        {/* Authentication */}
-        <Route path="/" element={<Login />} />
+        {/* Public */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
 
-        {/* Pages with Navbar */}
-        <Route path="/deviceAnalysis" element={<WithNavbar Component={DeviceAnalysis} />} />
-        <Route path="/rfidcard" element={<WithNavbar Component={RfidCard} />} />
+        {/* Protected routes (all children require auth) */}
+        <Route element={<ProtectedRoutes />}>
+          <Route path="/deviceAnalysis" element={<WithNavbar Component={DeviceAnalysis} />} />
+          <Route path="/rfidcard" element={<WithNavbar Component={RfidCard} />} />
+          <Route path="/rfidhistory/:id" element={<WithNavbar Component={RfidHistory} />} />
+          <Route path="/editrfid/:id" element={<WithNavbar Component={EditRfidCard} />} />
+          <Route path="/editrfidcard/:id" element={<WithNavbar Component={EditRfidCard} />} />
+          <Route path="/device" element={<WithNavbar Component={Device} />} />
+          <Route path="/addDevice" element={<WithNavbar Component={AddDevice} />} />
+          <Route path="/editdevice/:id" element={<WithNavbar Component={EditDevice} />} />
+          <Route path="/user" element={<WithNavbar Component={User} />} />
+          {/* if you want, a protected 404 or fallback can be added */}
+        </Route>
 
-        {/* History routes */}
-        <Route path="/rfidhistory/:id" element={<WithNavbar Component={RfidHistory} />} />
-        <Route path="/rfidhistory" element={<Navigate to="/rfidcard" replace />} />
-
-        {/* Edit RFID routes */}
-        <Route path="/editrfid/:id" element={<WithNavbar Component={EditRfidCard} />} />
-        <Route path="/editrfidcard/:id" element={<WithNavbar Component={EditRfidCard} />} />
-        <Route path="/editrfidcard" element={<Navigate to="/rfidcard" replace />} />
-
-        {/* Device CRUD routes (normalized) */}
-        <Route path="/device" element={<WithNavbar Component={Device} />} />
-        <Route path="/addDevice" element={<WithNavbar Component={AddDevice} />} />
-        {/* redirect bare /editdevice to list to avoid 404 when no id provided */}
-        <Route path="/editdevice" element={<Navigate to="/devices" replace />} />
-        <Route path="/editdevice/:id" element={<WithNavbar Component={EditDevice} />} />
-
-        {/* User */}
-        <Route path="/user" element={<WithNavbar Component={User} />} />
-
-        {/* Catch-all 404 */}
+        {/* Catch-all 404 for unmatched public paths */}
         <Route path="*" element={<div style={{ padding: 20 }}>Page not found</div>} />
       </Routes>
     </Router>

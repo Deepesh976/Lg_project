@@ -12,6 +12,7 @@ const deviceRoutes = require('./routes/deviceRoutes');
 const analysisRoutes = require('./routes/analysisRoutes');
 const rfidRoutes = require('./routes/rfidRoutes');
 const proxyAtw = require('./routes/proxyAtw');
+const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
@@ -50,6 +51,7 @@ app.use('/api/device', deviceRoutes);     // ✅ Devices section
 app.use('/api/analysis', analysisRoutes);  // ✅ Device Analysis section
 app.use('/api/rfid', rfidRoutes);          // ✅ RFID Card section
 app.use('/api/proxy', proxyAtw);
+app.use('/api/admin', adminRoutes);
 
 
 // ==== Root & Health ====

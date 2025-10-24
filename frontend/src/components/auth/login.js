@@ -1,5 +1,7 @@
+// src/pages/Login.js
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
 const styles = {
   wrapper: {
@@ -164,12 +166,62 @@ const styles = {
 
 const Login = () => {
   const [btnHover, setBtnHover] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [errMsg, setErrMsg] = useState('');
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Add authentication logic here
-    navigate('/rfidcard', { replace: true });
+    setErrMsg('');
+    if (!email || !password) {
+      setErrMsg('Please enter both email and password.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await axios.post(
+        '/api/admin/login',
+        { email: email.trim(), password },
+        { timeout: 10000 }
+      );
+
+      const token = res?.data?.token;
+      if (!token) {
+        setErrMsg('Login failed: server did not return a token.');
+        setLoading(false);
+        return;
+      }
+
+      // store token and set axios default header
+      localStorage.setItem('lg_admin_token', token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+      // optionally store admin info
+      if (res.data?.admin) {
+        try {
+          localStorage.setItem('lg_admin', JSON.stringify(res.data.admin));
+        } catch (e) {
+          // ignore storage errors
+        }
+      }
+
+      // redirect to protected area
+      navigate('/rfidcard', { replace: true });
+    } catch (err) {
+      console.error('Login error:', err);
+      if (err.response && err.response.data && err.response.data.message) {
+        setErrMsg(err.response.data.message);
+      } else if (err.code === 'ECONNABORTED') {
+        setErrMsg('Login timed out. Please try again.');
+      } else {
+        setErrMsg('Login failed. Check credentials or server.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -346,7 +398,46 @@ const Login = () => {
               </p>
 
               <form onSubmit={handleSubmit}>
-                {/* Submit Button */}
+                {errMsg && (
+                  <div style={{ color: 'crimson', marginBottom: 12, textAlign: 'center' }}>
+                    {errMsg}
+                  </div>
+                )}
+
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>
+                    <i className="fas fa-envelope" style={{ marginRight: 8, color: '#3f51b5' }} />
+                    Email
+                  </label>
+                  <input
+                    className="login-input-field"
+                    style={styles.inputField}
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="email"
+                    required
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>
+                    <i className="fas fa-lock" style={{ marginRight: 8, color: '#3f51b5' }} />
+                    Password
+                  </label>
+                  <input
+                    className="login-input-field"
+                    style={styles.inputField}
+                    type="password"
+                    placeholder="Your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    required
+                  />
+                </div>
+
                 <button
                   type="submit"
                   style={{
@@ -355,13 +446,16 @@ const Login = () => {
                     background: btnHover
                       ? 'linear-gradient(135deg, #2c3ea8 0%, #3d4888 100%)'
                       : 'linear-gradient(135deg, #3f51b5 0%, #5a55ae 100%)',
+                    opacity: loading ? 0.85 : 1,
+                    cursor: loading ? 'not-allowed' : 'pointer',
                   }}
                   className="login-submit-btn"
                   onMouseEnter={() => setBtnHover(true)}
                   onMouseLeave={() => setBtnHover(false)}
+                  disabled={loading}
                 >
                   <i className="fas fa-sign-in-alt" style={{ marginRight: '0.5rem' }}></i>
-                  Sign In
+                  {loading ? 'Signing in...' : 'Sign In'}
                 </button>
               </form>
             </div>
