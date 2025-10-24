@@ -1,6 +1,7 @@
 // Navbar.jsx
 import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import axios from "axios";
 
 const menuItems = [
   { path: "/device", label: "Devices", icon: "fas fa-microchip" },
@@ -26,8 +27,19 @@ export default function Navbar() {
   }, []);
 
   const handleLogout = () => {
-    localStorage.clear();
-    navigate("/");
+    try {
+      // clear stored auth
+      localStorage.removeItem("lg_admin_token");
+      localStorage.removeItem("lg_admin");
+      // remove axios default header if set
+      if (axios.defaults && axios.defaults.headers && axios.defaults.headers.common) {
+        delete axios.defaults.headers.common["Authorization"];
+      }
+    } catch (e) {
+      // ignore storage errors
+    }
+    // navigate to login (replace so back button doesn't return to protected pages)
+    navigate("/login", { replace: true });
   };
 
   // Inline styles (no external CSS)
@@ -116,6 +128,23 @@ export default function Navbar() {
     desktopActive: {
       background: "rgba(255,255,255,0.12)",
       color: "#fff",
+    },
+    // Logout (desktop)
+    logoutDesktop: {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+      padding: "8px 12px",
+      borderRadius: 8,
+      background: "rgba(255,255,255,0.12)",
+      color: "#fff",
+      border: "1px solid rgba(255,255,255,0.12)",
+      cursor: "pointer",
+      fontWeight: 700,
+      fontSize: 14,
+    },
+    logoutDesktopIcon: {
+      fontSize: 16,
     },
     // overlay and sidebar
     overlay: {
@@ -242,31 +271,39 @@ export default function Navbar() {
 
           {/* Desktop inline menu */}
           {isWide && (
-            <nav style={styles.desktopMenu} aria-label="Main navigation">
-              {menuItems.map((item) => {
-                const active = location.pathname === item.path;
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    style={{
-                      ...styles.desktopMenuItem,
-                      ...(active ? styles.desktopActive : {}),
-                    }}
-                  >
-                    <i className={item.icon} style={{ marginRight: 8 }} />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-            </nav>
+            <>
+              <nav style={styles.desktopMenu} aria-label="Main navigation">
+                {menuItems.map((item) => {
+                  const active = location.pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      style={{
+                        ...styles.desktopMenuItem,
+                        ...(active ? styles.desktopActive : {}),
+                      }}
+                    >
+                      <i className={item.icon} style={{ marginRight: 8 }} />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+
+              {/* Logout button on desktop */}
+              <button
+                onClick={handleLogout}
+                style={{ ...styles.logoutDesktop, marginLeft: 12 }}
+                aria-label="Logout"
+              >
+                <i className="fas fa-sign-out-alt" style={styles.logoutDesktopIcon} />
+                <span>Logout</span>
+              </button>
+            </>
           )}
         </div>
       </header>
-
-      {/* NOTE: removed the extra spacer div that caused the white gap.
-          If content sits under the fixed header in your layout, add paddingTop: 68
-          to your main page container instead (recommended). */}
 
       {/* Sidebar overlay (only when sidebar open) */}
       {showSidebar && <div style={styles.overlay} onClick={() => setShowSidebar(false)} />}
