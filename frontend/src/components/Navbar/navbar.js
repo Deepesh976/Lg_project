@@ -7,7 +7,7 @@ const menuItems = [
   { path: "/device", label: "Devices", icon: "fas fa-microchip" },
   { path: "/user", label: "Users", icon: "fas fa-users" },
   { path: "/rfidcard", label: "RFID Cards", icon: "fas fa-id-card" },
-  { path: "/deviceAnalysis", label: "Analytics", icon: "fas fa-chart-bar" },
+  // { path: "/deviceAnalysis", label: "Analytics", icon: "fas fa-chart-bar" },
 ];
 
 export default function Navbar() {
