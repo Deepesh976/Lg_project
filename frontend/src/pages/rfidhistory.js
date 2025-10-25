@@ -64,7 +64,7 @@ export default function RfidHistory() {
       setHistory(sorted);
 
       if (sorted.length === 0)
-        setError("No data found for this RFID UID (proxy returned empty).");
+        setError("No data found for this RFID UID");
     } catch (err) {
       console.error("fetchViaProxy error:", err);
       if (err.response)
