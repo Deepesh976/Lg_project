@@ -264,7 +264,7 @@ export default function Navbar() {
             <div style={styles.logoIcon}>
               <i className="fas fa-project-diagram" />
             </div>
-            <span style={styles.brandText}>LG PROJECT</span>
+            <span style={styles.brandText}>PURIFIED DRINKING WATER</span>
           </div>
 
           <div style={styles.spacer} />
@@ -315,7 +315,7 @@ export default function Navbar() {
             <div style={styles.sidebarLogoIcon}>
               <i className="fas fa-project-diagram" />
             </div>
-            <span style={styles.sidebarBrandText}>LG PROJECT</span>
+            <span style={styles.sidebarBrandText}>PURIFIED DRINKING WATER</span>
           </div>
 
           <button
