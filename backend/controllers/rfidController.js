@@ -237,7 +237,9 @@ exports.createRfid = async (req, res) => {
  */
 exports.getAllRfid = async (req, res) => {
   try {
-    const list = await Rfid.find().sort({ updatedAt: -1, createdAt: -1 }).lean();
+    const list = await Rfid.find()
+      .sort({ lastSeen: -1, updatedAt: -1, createdAt: -1 })
+      .lean();
     return res.status(200).json(list);
   } catch (err) {
     console.error('getAllRfid error:', err);
@@ -473,6 +475,32 @@ exports.getProxyHistory = async (req, res) => {
       const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
       return tb - ta;
     });
+
+    // --- NEW: update the Rfid.lastSeen for this uid using newest record's timestamp ---
+    try {
+      // pick the newest timestamp (first item after sort) if available
+      const newest = normalized.find((x) => x && x.timestamp);
+      const lastSeenDate = newest ? new Date(newest.timestamp) : new Date();
+
+      // update the Rfid document that matches rfid_uid === uid
+      // do not upsert — if card doesn't exist we choose not to create one automatically
+      const updateResult = await Rfid.findOneAndUpdate(
+        { rfid_uid: String(uid) },
+        { $set: { lastSeen: lastSeenDate } },
+        { new: true }
+      );
+
+      if (!updateResult) {
+        // optional: log when no matching card found (helps debug)
+        console.warn(`getProxyHistory: no Rfid document found for uid=${uid} to update lastSeen`);
+      } else {
+        // debug log (remove in production if noisy)
+        console.log(`getProxyHistory: updated lastSeen for uid=${uid} -> ${lastSeenDate.toISOString()}`);
+      }
+    } catch (updateErr) {
+      console.error(`getProxyHistory: failed to update lastSeen for uid=${uid}:`, updateErr && updateErr.message);
+      // Continue — we don't want a lastSeen update failure to block returning the history
+    }
 
     return res.status(200).json({
       message: 'Proxy history fetched and normalized',

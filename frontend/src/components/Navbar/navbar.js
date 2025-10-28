@@ -5,9 +5,8 @@ import axios from "axios";
 
 const menuItems = [
   { path: "/device", label: "Devices", icon: "fas fa-microchip" },
-  { path: "/user", label: "Users", icon: "fas fa-users" },
-  { path: "/rfidcard", label: "RFID Cards", icon: "fas fa-id-card" },
-  // { path: "/deviceAnalysis", label: "Analytics", icon: "fas fa-chart-bar" },
+  { path: "/user", label: "Add Users", icon: "fas fa-users" },
+  { path: "/rfidcard", label: "User Details", icon: "fas fa-id-card" },
 ];
 
 export default function Navbar() {
@@ -28,25 +27,17 @@ export default function Navbar() {
 
   const handleLogout = () => {
     try {
-      // clear stored auth
       localStorage.removeItem("lg_admin_token");
       localStorage.removeItem("lg_admin");
-      // remove axios default header if set
-      if (axios.defaults && axios.defaults.headers && axios.defaults.headers.common) {
+      if (axios.defaults?.headers?.common) {
         delete axios.defaults.headers.common["Authorization"];
       }
-    } catch (e) {
-      // ignore storage errors
-    }
-    // navigate to login (replace so back button doesn't return to protected pages)
+    } catch (e) {}
     navigate("/login", { replace: true });
   };
 
-  // Inline styles (no external CSS)
   const styles = {
-    fontLink: {
-      display: "none",
-    },
+    fontLink: { display: "none" },
     navbarTop: {
       position: "fixed",
       top: 0,
@@ -85,30 +76,21 @@ export default function Navbar() {
       fontSize: 14,
       outline: "none",
     },
-    menuIcon: {
-      fontSize: 18,
-      lineHeight: 1,
-    },
+    menuIcon: { fontSize: 18, lineHeight: 1 },
     navbarBrand: {
       display: "flex",
       alignItems: "center",
       gap: 12,
     },
-    logoIcon: {
-      width: 36,
-      height: 36,
+    logoImg: {
+      width: 38,
+      height: 38,
       borderRadius: 8,
+      objectFit: "cover",
       background: "rgba(255,255,255,0.12)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontWeight: 700,
+      padding: 4,
     },
-    brandText: {
-      fontSize: 20,
-      fontWeight: 800,
-      letterSpacing: 0.4,
-    },
+    brandText: { fontSize: 20, fontWeight: 800, letterSpacing: 0.4 },
     spacer: { flex: 1 },
     desktopMenu: {
       display: "flex",
@@ -125,11 +107,7 @@ export default function Navbar() {
       textDecoration: "none",
       whiteSpace: "nowrap",
     },
-    desktopActive: {
-      background: "rgba(255,255,255,0.12)",
-      color: "#fff",
-    },
-    // Logout (desktop)
+    desktopActive: { background: "rgba(255,255,255,0.12)", color: "#fff" },
     logoutDesktop: {
       display: "inline-flex",
       alignItems: "center",
@@ -143,10 +121,7 @@ export default function Navbar() {
       fontWeight: 700,
       fontSize: 14,
     },
-    logoutDesktopIcon: {
-      fontSize: 16,
-    },
-    // overlay and sidebar
+    logoutDesktopIcon: { fontSize: 16 },
     overlay: {
       position: "fixed",
       inset: 0,
@@ -180,19 +155,21 @@ export default function Navbar() {
       alignItems: "center",
       gap: 10,
     },
-    sidebarLogoIcon: {
+    sidebarLogoImg: {
       width: 44,
       height: 44,
       borderRadius: 8,
+      objectFit: "cover",
       background: "#f1f4ff",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#4a3fd6",
-      fontWeight: 800,
+      padding: 4,
     },
     sidebarBrandText: { fontWeight: 800, fontSize: 16 },
-    sidebarCloseBtn: { background: "transparent", border: "none", cursor: "pointer", fontSize: 18 },
+    sidebarCloseBtn: {
+      background: "transparent",
+      border: "none",
+      cursor: "pointer",
+      fontSize: 18,
+    },
     sidebarNav: {
       display: "flex",
       flexDirection: "column",
@@ -235,7 +212,6 @@ export default function Navbar() {
 
   return (
     <>
-      {/* Font Awesome link: it's fine here but adding to public/index.html <head> is more reliable */}
       <link
         rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
@@ -246,7 +222,6 @@ export default function Navbar() {
 
       <header style={styles.navbarTop}>
         <div style={styles.navbarContainer}>
-          {/* show hamburger on small screens */}
           {!isWide && (
             <button
               style={styles.menuBtn}
@@ -259,17 +234,14 @@ export default function Navbar() {
             </button>
           )}
 
-          {/* brand */}
+          {/* ✅ Updated Brand Section with logo.png */}
           <div style={styles.navbarBrand}>
-            <div style={styles.logoIcon}>
-              <i className="fas fa-project-diagram" />
-            </div>
+            <img src="/logo.png" alt="Logo" style={styles.logoImg} />
             <span style={styles.brandText}>PURIFIED DRINKING WATER</span>
           </div>
 
           <div style={styles.spacer} />
 
-          {/* Desktop inline menu */}
           {isWide && (
             <>
               <nav style={styles.desktopMenu} aria-label="Main navigation">
@@ -291,7 +263,6 @@ export default function Navbar() {
                 })}
               </nav>
 
-              {/* Logout button on desktop */}
               <button
                 onClick={handleLogout}
                 style={{ ...styles.logoutDesktop, marginLeft: 12 }}
@@ -305,16 +276,13 @@ export default function Navbar() {
         </div>
       </header>
 
-      {/* Sidebar overlay (only when sidebar open) */}
       {showSidebar && <div style={styles.overlay} onClick={() => setShowSidebar(false)} />}
 
-      {/* Sidebar */}
+      {/* ✅ Updated Sidebar Brand with logo.png */}
       <aside style={styles.sidebar} aria-hidden={!showSidebar}>
         <div style={styles.sidebarHeader}>
           <div style={styles.sidebarBrand}>
-            <div style={styles.sidebarLogoIcon}>
-              <i className="fas fa-project-diagram" />
-            </div>
+            <img src="/logo.png" alt="Logo" style={styles.sidebarLogoImg} />
             <span style={styles.sidebarBrandText}>PURIFIED DRINKING WATER</span>
           </div>
 

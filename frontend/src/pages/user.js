@@ -64,7 +64,6 @@ export default function User() {
           ? Number(form.quant_water_alloted_per_month)
           : 0,
         swipe_count: form.swipe_count ? Number(form.swipe_count) : 0,
-        // NEW field name used consistently with backend/model
         total_litres_consumed: form.total_litres_consumed
           ? Number(form.total_litres_consumed)
           : 0,
@@ -87,38 +86,153 @@ export default function User() {
     }
   };
 
+  // Inline content/container styles to ensure heading and layout are correct
+  const styles = {
+    pageWrapper: {
+      padding: "28px 24px",
+      display: "flex",
+      justifyContent: "center",
+      background: "transparent",
+      minHeight: "calc(100vh - 80px)",
+      boxSizing: "border-box",
+    },
+    pageContainer: {
+      width: "100%",
+      maxWidth: 1200,
+    },
+    formWrapper: {
+      background: "#fff",
+      borderRadius: 14,
+      padding: 28,
+      boxShadow: "0 6px 24px rgba(30,40,80,0.08)",
+      boxSizing: "border-box",
+    },
+    formTitle: {
+      color: "#000", // force black
+      fontWeight: 800,
+      fontSize: 28,
+      textAlign: "center",
+      margin: "4px 0 24px 0",
+    },
+    formGrid: {
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: 20,
+      alignItems: "start",
+    },
+    // individual group fallback (keeps your CSS classes but ensures label/input styles)
+    formGroup: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+    },
+    formLabel: {
+      color: "#111",
+      fontWeight: 700,
+      fontSize: 15,
+    },
+    formInput: {
+      padding: "14px 16px",
+      borderRadius: 10,
+      border: "1px solid #e0e3e8",
+      background: "#fff",
+      outline: "none",
+      fontSize: 14,
+      color: "#111",
+      boxSizing: "border-box",
+    },
+    formActions: {
+      marginTop: 26,
+      display: "flex",
+      gap: 12,
+      justifyContent: "flex-start",
+      gridColumn: "1 / -1",
+    },
+    btnPrimary: {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+      padding: "10px 16px",
+      borderRadius: 10,
+      border: "none",
+      background: "#4a3fd6",
+      color: "#fff",
+      fontWeight: 700,
+      cursor: "pointer",
+      fontSize: 14,
+    },
+    btnSecondary: {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+      padding: "10px 16px",
+      borderRadius: 10,
+      border: "1px solid #d5d7db",
+      background: "#fff",
+      color: "#111",
+      fontWeight: 700,
+      cursor: "pointer",
+      fontSize: 14,
+    },
+    // responsive tweaks
+    '@media_sm': {
+      formGrid: {
+        gridTemplateColumns: "repeat(2, 1fr)",
+      },
+    },
+    '@media_xs': {
+      formGrid: {
+        gridTemplateColumns: "1fr",
+      },
+    },
+  };
+
   return (
-    <div className="page-wrapper">
-      <div className="page-container">
-        <div className="form-wrapper">
-          <h2 className="form-title">Add User Details</h2>
+    <div className="page-wrapper" style={styles.pageWrapper}>
+      <div className="page-container" style={styles.pageContainer}>
+        <div className="form-wrapper" style={styles.formWrapper}>
+          {/* single heading, forced to black */}
+          <h2 className="form-title" style={styles.formTitle}>
+            Add User Details
+          </h2>
 
           <form onSubmit={handleSubmit}>
-            <div className="form-grid">
-              <div className="form-group">
-                <label className="form-label">RFID Serial No <span className="required">*</span></label>
+            <div className="form-grid" style={styles.formGrid}>
+              {/* RFID Serial No */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  RFID Serial No <span className="required">*</span>
+                </label>
                 <input
                   className="form-input"
                   name="rfid_serial_no"
                   value={form.rfid_serial_no}
                   onChange={handleChange}
                   placeholder="Enter Serial no"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">RFID UID <span className="required">*</span></label>
+              {/* RFID UID */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  RFID UID <span className="required">*</span>
+                </label>
                 <input
                   className="form-input"
                   name="rfid_uid"
                   value={form.rfid_uid}
                   onChange={handleChange}
                   placeholder="Enter UID"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Username <span className="required">*</span></label>
+              {/* Username */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Username <span className="required">*</span>
+                </label>
                 <input
                   className="form-input"
                   name="user_name"
@@ -126,11 +240,15 @@ export default function User() {
                   onChange={handleChange}
                   placeholder="Enter user name"
                   required
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Mobile <span className="required">*</span></label>
+              {/* Mobile */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Mobile <span className="required">*</span>
+                </label>
                 <input
                   className="form-input"
                   name="mobile_no"
@@ -139,44 +257,60 @@ export default function User() {
                   placeholder="Enter mobile number"
                   required
                   type="tel"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Address</label>
+              {/* Address */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Address
+                </label>
                 <input
                   className="form-input"
                   name="address"
                   value={form.address}
                   onChange={handleChange}
                   placeholder="Address"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Village</label>
+              {/* Village */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Village
+                </label>
                 <input
                   className="form-input"
                   name="village"
                   value={form.village}
                   onChange={handleChange}
                   placeholder="Village"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Aadhar No</label>
+              {/* Aadhar */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Aadhar No
+                </label>
                 <input
                   className="form-input"
                   name="aadhar_no"
                   value={form.aadhar_no}
                   onChange={handleChange}
                   placeholder="Aadhar number"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Family Members</label>
+              {/* Family Members */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Family Members
+                </label>
                 <input
                   className="form-input"
                   name="family_mems"
@@ -184,11 +318,15 @@ export default function User() {
                   onChange={handleChange}
                   placeholder="Number of family members"
                   type="number"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Water / Day (L)</label>
+              {/* Water / Day */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Water / Day (L)
+                </label>
                 <input
                   className="form-input"
                   name="quant_water_alloted_per_day"
@@ -196,11 +334,15 @@ export default function User() {
                   onChange={handleChange}
                   placeholder="Daily allotment (L)"
                   type="number"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Water / Month (L)</label>
+              {/* Water / Month */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Water / Month (L)
+                </label>
                 <input
                   className="form-input"
                   name="quant_water_alloted_per_month"
@@ -208,11 +350,15 @@ export default function User() {
                   onChange={handleChange}
                   placeholder="Monthly allotment (L)"
                   type="number"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">No of times visited (month)</label>
+              {/* Swipe Count */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  No of times visited (month)
+                </label>
                 <input
                   className="form-input"
                   name="swipe_count"
@@ -220,11 +366,15 @@ export default function User() {
                   onChange={handleChange}
                   placeholder="Number of swipes"
                   type="number"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Total Litres Consumed (L)</label>
+              {/* Total Litres Consumed */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Total Litres Consumed (L)
+                </label>
                 <input
                   className="form-input"
                   name="total_litres_consumed"
@@ -232,11 +382,15 @@ export default function User() {
                   onChange={handleChange}
                   placeholder="Total litres consumed"
                   type="number"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Remaining Card Balance (₹)</label>
+              {/* Remaining Card Balance */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Remaining Card Balance (₹)
+                </label>
                 <input
                   className="form-input"
                   name="remaining_card_balance"
@@ -246,30 +400,48 @@ export default function User() {
                   type="number"
                   step="0.01"
                   min="0"
+                  style={styles.formInput}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Remarks</label>
+              {/* Remarks */}
+              <div className="form-group" style={styles.formGroup}>
+                <label className="form-label" style={styles.formLabel}>
+                  Remarks
+                </label>
                 <input
                   className="form-input"
                   name="remarks"
                   value={form.remarks}
                   onChange={handleChange}
                   placeholder="Remarks"
+                  style={styles.formInput}
                 />
               </div>
-            </div>
 
-            <div className="form-actions">
-              <button className="btn btn-primary" type="submit" disabled={loading}>
-                <i className="fas fa-save"></i>
-                {loading ? "Saving..." : "Save & Go to RFID list"}
-              </button>
-              <button className="btn btn-secondary" type="button" onClick={handleReset} disabled={loading}>
-                <i className="fas fa-redo"></i>
-                Reset
-              </button>
+              {/* Actions row spans full width */}
+              <div style={styles.formActions}>
+                <button
+                  className="btn btn-primary"
+                  type="submit"
+                  disabled={loading}
+                  style={styles.btnPrimary}
+                >
+                  <i className="fas fa-save" />
+                  {loading ? " Saving..." : " Save & Go to RFID list"}
+                </button>
+
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={handleReset}
+                  disabled={loading}
+                  style={styles.btnSecondary}
+                >
+                  <i className="fas fa-redo" />
+                  Reset
+                </button>
+              </div>
             </div>
           </form>
         </div>

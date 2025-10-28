@@ -3,13 +3,14 @@ const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
 const ctrl = require('../controllers/deviceController');
+const { protect } = require('../middlewares/auth'); // require protect middleware
 
-// small helper to wrap async route handlers and forward errors to express
+// async wrapper to forward errors to express error handler
 const asyncWrap = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// Validate :id param early to avoid extra DB lookups or confusing errors
+// Validate :id param early
 router.param('id', (req, res, next, id) => {
   if (!mongoose.isValidObjectId(id)) {
     return res.status(400).json({ message: 'Invalid id parameter' });
@@ -17,13 +18,18 @@ router.param('id', (req, res, next, id) => {
   next();
 });
 
-// Optional: basic request logging (remove or lower log level in production)
-router.use((req, res, next) => {
-  console.log(`[deviceRoutes] ${req.method} ${req.originalUrl}`);
-  next();
-});
+// Optional logging in dev
+if (process.env.NODE_ENV !== 'production') {
+  router.use((req, res, next) => {
+    console.log(`[deviceRoutes] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+}
 
-// Routes (note: analysis route kept before :id so it isn't treated as an id)
+// Protect all device routes (only authenticated admins can access)
+router.use(protect);
+
+// Routes
 router.post('/', asyncWrap(ctrl.createDevice));
 router.get('/', asyncWrap(ctrl.listDevices));
 router.get('/analysis/summary', asyncWrap(ctrl.analysisSummary));

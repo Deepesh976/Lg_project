@@ -3,12 +3,12 @@ const mongoose = require('mongoose');
 const Device = require('../models/Device');
 
 let Price;
-try {
-  Price = require('../models/Price');
-} catch (e) {
-  Price = null;
-  console.warn('Price model not found. Price-related endpoints will work but price history/cascade delete will be skipped.');
-}
+// try {
+//   Price = require('../models/Price');
+// } catch (e) {
+//   Price = null;
+//   console.warn('Price model not found. Price-related endpoints will work but price history/cascade delete will be skipped.');
+// }
 
 const ALLOWED_STATUSES = ['ACTIVE', 'INACTIVE', 'MAINTENANCE'];
 

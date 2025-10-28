@@ -24,6 +24,9 @@ const RfidSchema = new mongoose.Schema(
     // Remaining card balance
     remaining_card_balance: { type: Number, default: 0, min: 0 },
 
+    // New field 👇
+    lastSeen: { type: Date, default: null, index: true },
+
     // Extras
     remarks: { type: String, default: '', trim: true }
   },
