@@ -2,9 +2,9 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-  // optional rfid fields (if you later attach a card)
+  
   rfid_serial_no: { type: String, trim: true, default: '' },
-  rfid_uid: { type: String, trim: true, default: '' },
+  rfid_uid: { type: String, trim: true, default: null, index: { unique: true, sparse: true } },
 
   user_name: { type: String, required: true, trim: true },
   address: { type: String, default: '', trim: true },

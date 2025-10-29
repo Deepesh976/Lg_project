@@ -1,5 +1,5 @@
 // src/pages/user.js
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "../styles/pages.css";
@@ -27,30 +27,113 @@ export default function User() {
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(false);
 
+  // RFID availability state
+  // null = unknown/empty, "checking" = in-flight, true = available, false = taken
+  const [rfidStatus, setRfidStatus] = useState(null);
+  const rfidDebounceRef = useRef(null);
+  const lastCheckedRef = useRef("");
+
+  // Helper: normalize UID for checking
+  const normalizeUid = (v) => (v ?? "").toString().trim();
+
+  // Watch rfid_uid and debounce-check availability
+  useEffect(() => {
+    const uid = normalizeUid(form.rfid_uid);
+
+    // reset if empty
+    if (!uid) {
+      if (rfidDebounceRef.current) clearTimeout(rfidDebounceRef.current);
+      setRfidStatus(null);
+      lastCheckedRef.current = "";
+      return;
+    }
+
+    // if we've already checked this value and it's same, skip
+    if (lastCheckedRef.current === uid) {
+      // keep previous status (no-change)
+      return;
+    }
+
+    // debounce
+    setRfidStatus("checking");
+    if (rfidDebounceRef.current) clearTimeout(rfidDebounceRef.current);
+    rfidDebounceRef.current = setTimeout(async () => {
+      try {
+        // call the endpoint — 200 means exists (taken), 404 means not found (available)
+        await axios.get(`/api/rfid/uid/${encodeURIComponent(uid)}`, { timeout: 8000 });
+        // if the GET succeeded, the UID exists => taken
+        setRfidStatus(false);
+      } catch (err) {
+        if (err.response && err.response.status === 404) {
+          // not found -> available
+          setRfidStatus(true);
+        } else {
+          // network or unexpected error -> treat as unknown but inform user
+          console.warn("RFID availability check failed:", err);
+          setRfidStatus(null);
+        }
+      } finally {
+        lastCheckedRef.current = uid;
+      }
+    }, 320);
+
+    return () => {
+      if (rfidDebounceRef.current) clearTimeout(rfidDebounceRef.current);
+    };
+  }, [form.rfid_uid]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+    // If user edits the rfid_uid after a previous check, mark status unknown so it re-checks
+    if (name === "rfid_uid") {
+      setRfidStatus("checking"); // show checking until debounce resolves (gives immediate UX)
+      // reset lastCheckedRef to allow re-check even if same value typed again
+      lastCheckedRef.current = "";
+    }
   };
 
   const handleReset = () => {
     setForm(initialForm);
+    setRfidStatus(null);
+    lastCheckedRef.current = "";
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Basic validation
+    // Basic validation (username, mobile) + RFID UID required (per your form labels)
     if (!form.user_name?.trim() || !String(form.mobile_no || "").trim()) {
       alert("Please provide user name and mobile number.");
       return;
     }
 
+    const uid = normalizeUid(form.rfid_uid);
+    if (!uid) {
+      alert("Please provide an RFID UID.");
+      return;
+    }
+
+    // If availability check is in-flight, block submit until it's resolved
+    if (rfidStatus === "checking") {
+      alert("Checking RFID availability — please wait a moment and try again.");
+      return;
+    }
+
+    // If we know it's taken, block submit
+    if (rfidStatus === false) {
+      alert("This RFID UID is already assigned to another user. Please use a different UID.");
+      return;
+    }
+
+    // If rfidStatus is null (unknown, e.g. network error), we can either block or proceed.
+    // Here we proceed but server will enforce uniqueness and return 409 on duplicate.
     try {
       setLoading(true);
 
       const payload = {
         rfid_serial_no: (form.rfid_serial_no || "").trim(),
-        rfid_uid: (form.rfid_uid || "").trim(),
+        rfid_uid: uid,
         user_name: (form.user_name || "").trim(),
         address: (form.address || "").trim(),
         village: (form.village || "").trim(),
@@ -75,10 +158,21 @@ export default function User() {
 
       await axios.post("/api/rfid", payload);
 
-      // Navigate back to rfid list and request refresh
+      // success -> navigate back to rfid list and request refresh
       navigate("/rfidcard", { state: { refresh: true } });
     } catch (err) {
       console.error("Error creating RFID/user:", err?.response || err?.message || err);
+
+      // Handle server duplicate-key (race) explicitly
+      if (err?.response?.status === 409) {
+        // Prefer server-provided message if present
+        const msg = err?.response?.data?.message || "RFID UID already exists (server).";
+        alert(msg);
+        // mark status as taken so user sees indicator
+        setRfidStatus(false);
+        return;
+      }
+
       const msg = err?.response?.data?.message || "Failed to create user";
       alert(msg);
     } finally {
@@ -141,6 +235,10 @@ export default function User() {
       color: "#111",
       boxSizing: "border-box",
     },
+    smallNote: {
+      fontSize: 12,
+      marginTop: 6,
+    },
     formActions: {
       marginTop: 26,
       display: "flex",
@@ -174,17 +272,23 @@ export default function User() {
       cursor: "pointer",
       fontSize: 14,
     },
-    // responsive tweaks
-    '@media_sm': {
-      formGrid: {
-        gridTemplateColumns: "repeat(2, 1fr)",
-      },
-    },
-    '@media_xs': {
-      formGrid: {
-        gridTemplateColumns: "1fr",
-      },
-    },
+  };
+
+  // small helper to render RFID availability note
+  const renderRfidHint = () => {
+    const uid = normalizeUid(form.rfid_uid);
+    if (!uid) return null;
+    if (rfidStatus === "checking") {
+      return <div style={{ ...styles.smallNote, color: "#6b7280" }}>Checking RFID UID availability…</div>;
+    }
+    if (rfidStatus === true) {
+      return <div style={{ ...styles.smallNote, color: "green" }}>RFID UID available ✅</div>;
+    }
+    if (rfidStatus === false) {
+      return <div style={{ ...styles.smallNote, color: "crimson" }}>This RFID UID is already assigned to another card.</div>;
+    }
+    // unknown / network error
+    return <div style={{ ...styles.smallNote, color: "#6b7280" }}>Could not verify availability (network/server). You can still try to save; the server will reject duplicates.</div>;
   };
 
   return (
@@ -226,6 +330,7 @@ export default function User() {
                   placeholder="Enter UID"
                   style={styles.formInput}
                 />
+                {renderRfidHint()}
               </div>
 
               {/* Username */}
@@ -424,7 +529,7 @@ export default function User() {
                 <button
                   className="btn btn-primary"
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || rfidStatus === "checking" || rfidStatus === false}
                   style={styles.btnPrimary}
                 >
                   <i className="fas fa-save" />

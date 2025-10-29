@@ -11,6 +11,8 @@ import axios from "axios";
  * Behavior changes:
  * - Records are sorted so the most recently updated / newest records come first.
  * - The parser is tolerant to common field names and several timestamp shapes.
+ * - When new history is loaded this component dispatches a `rfid-history-updated` window event
+ *   with detail { rfidUid: "<uid>" } so other components (like rfidcard list) can react.
  */
 
 export default function RfidHistory() {
@@ -63,8 +65,32 @@ export default function RfidHistory() {
       const sorted = withTs.map((w) => w.original);
       setHistory(sorted);
 
-      if (sorted.length === 0)
-        setError("No data found for this RFID UID");
+      // ---- NEW: notify other components (e.g. rfidcard list) that this UID's history updated ----
+      try {
+        // Prefer the newest record's UID if available, else fall back to route id
+        let uidToNotify = null;
+        if (Array.isArray(sorted) && sorted.length > 0) {
+          const first = sorted[0];
+          uidToNotify =
+            first.RFID_UID ||
+            first["RFID UID"] ||
+            first.rfid_uid ||
+            first.uid ||
+            null;
+        }
+        if (!uidToNotify) uidToNotify = id;
+        if (uidToNotify) {
+          const detail = { rfidUid: String(uidToNotify).trim() };
+          window.dispatchEvent(new CustomEvent("rfid-history-updated", { detail }));
+          // optional debug — remove in production:
+          // console.log("🔔 rfidhistory dispatched rfid-history-updated", detail);
+        }
+      } catch (e) {
+        console.warn("rfidhistory: notify dispatch failed", e);
+      }
+      // -----------------------------------------------------------------------------------------
+
+      if (sorted.length === 0) setError("No data found for this RFID UID");
     } catch (err) {
       console.error("fetchViaProxy error:", err);
       if (err.response)

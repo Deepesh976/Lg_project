@@ -1,11 +1,14 @@
 // server.js
 // Main backend server for RFID Project
-// Uses Express, Mongoose, CORS, and Dotenv
+// Uses Express, Mongoose, CORS, Dotenv and Socket.IO for real-time events
 
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
+
+const http = require('http');
+const { Server: SocketIOServer } = require('socket.io');
 
 // ==== Route Imports ====
 const deviceRoutes = require('./routes/deviceRoutes');
@@ -23,7 +26,8 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
 
 // ==== Middleware ====
 // Support comma-separated origins in CORS_ORIGIN env var
-const allowedOrigins = CORS_ORIGIN.split(',').map(s => s.trim());
+const allowedOrigins = CORS_ORIGIN.split(',').map((s) => s.trim());
+
 const corsOptions = {
   origin: (origin, callback) => {
     // allow requests with no origin (like curl, mobile apps or server-to-server)
@@ -33,7 +37,7 @@ const corsOptions = {
     }
     return callback(new Error('Not allowed by CORS'));
   },
-  credentials: true
+  credentials: true,
 };
 app.use(cors(corsOptions));
 
@@ -47,12 +51,11 @@ app.use((req, res, next) => {
 });
 
 // ==== API Routes ====
-app.use('/api/device', deviceRoutes);     // ✅ Devices section
-app.use('/api/analysis', analysisRoutes);  // ✅ Device Analysis section
-app.use('/api/rfid', rfidRoutes);          // ✅ RFID Card section
+app.use('/api/device', deviceRoutes); // ✅ Devices section
+app.use('/api/analysis', analysisRoutes); // ✅ Device Analysis section
+app.use('/api/rfid', rfidRoutes); // ✅ RFID Card section
 app.use('/api/proxy', proxyAtw);
 app.use('/api/admin', adminRoutes);
-
 
 // ==== Root & Health ====
 app.get('/', (req, res) => res.send('✅ RFID API is running...'));
@@ -80,11 +83,36 @@ if (process.env.NODE_ENV !== 'production') {
   mongoose.set('debug', true);
 }
 
+// Connect to Mongo and then start HTTP + Socket.IO server
 mongoose
   .connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
     console.log('✅ Connected to MongoDB');
-    app.listen(PORT, () => {
+
+    // create http server (so we can attach socket.io)
+    const server = http.createServer(app);
+
+    // initialize socket.io
+    const io = new SocketIOServer(server, {
+      cors: {
+        // socket.io expects either string or array for origin; pass allowedOrigins or "*"
+        origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
+        methods: ['GET', 'POST'],
+      },
+    });
+
+    // attach io to express app so controllers can access req.app.get('io')
+    app.set('io', io);
+
+    io.on('connection', (socket) => {
+      console.log('🔌 New socket connection:', socket.id);
+
+      socket.on('disconnect', (reason) => {
+        console.log('🔌 Socket disconnected:', socket.id, 'reason:', reason);
+      });
+    });
+
+    server.listen(PORT, () => {
       console.log(`🚀 Server running at http://localhost:${PORT}`);
       console.log(`🌐 CORS allowed from: ${allowedOrigins.join(', ')}`);
     });

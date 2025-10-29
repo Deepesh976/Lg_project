@@ -174,9 +174,15 @@ const normalizeProxyRecord = (item) => {
 /** ---------- CRUD endpoints (existing) ---------- */
 
 /**
- * @desc Create a new RFID record (User)
- * @route POST /api/rfid
+ * Helper: set both lastSeen (camelCase) and last_seen (snake_case) values on an update object
+ * value must be a Date instance
  */
+const setBothLastSeen = (updateObj, dateValue) => {
+  if (!dateValue || !(dateValue instanceof Date)) return;
+  updateObj.lastSeen = dateValue;
+  updateObj.last_seen = dateValue;
+};
+
 exports.createRfid = async (req, res) => {
   try {
     const data = req.body || {};
@@ -203,6 +209,17 @@ exports.createRfid = async (req, res) => {
       remaining_card_balance = Number.isNaN(n) ? 0 : n < 0 ? 0 : n;
     }
 
+    // Prefer explicit lastSeen/last_seen if provided; otherwise use now
+    let initialLastSeen = null;
+    if (data.lastSeen) {
+      const d = new Date(data.lastSeen);
+      if (!Number.isNaN(d.getTime())) initialLastSeen = d;
+    } else if (data.last_seen) {
+      const d = new Date(data.last_seen);
+      if (!Number.isNaN(d.getTime())) initialLastSeen = d;
+    }
+    if (!initialLastSeen) initialLastSeen = new Date();
+
     const rfid = new Rfid({
       rfid_serial_no: data.rfid_serial_no || '',
       rfid_uid: data.rfid_uid || '',
@@ -218,9 +235,22 @@ exports.createRfid = async (req, res) => {
       total_litres_consumed: Number.isNaN(total_litres_consumed) ? 0 : total_litres_consumed,
       remaining_card_balance,
       remarks: data.remarks || '',
+      lastSeen: initialLastSeen,
+      last_seen: initialLastSeen,
     });
 
     const saved = await rfid.save();
+
+    // Emit to connected clients so they can upsert the new record
+    try {
+      const io = req.app && req.app.get && req.app.get('io');
+      if (io) {
+        io.emit('rfid-record-updated', { record: saved.toObject ? saved.toObject() : saved });
+      }
+    } catch (e) {
+      console.warn('createRfid: socket emit failed', e && e.message);
+    }
+
     return res.status(201).json(saved);
   } catch (err) {
     console.error('createRfid error:', err);
@@ -232,25 +262,97 @@ exports.createRfid = async (req, res) => {
 };
 
 /**
- * @desc Get all RFID (User) records, sorted by most recently updated first
- * @route GET /api/rfid
+ * GET /api/rfid
+ * Supports q, page, limit, sort
+ * Sorting preference: last_seen (snake_case) -> lastSeen -> updatedAt -> createdAt
+ *
+ * - If pagination requested (page & limit valid integers): use aggregation with $facet to get items + total
+ * - If no pagination: use find().sort() directly (explicit)
  */
 exports.getAllRfid = async (req, res) => {
   try {
-    const list = await Rfid.find()
-      .sort({ lastSeen: -1, updatedAt: -1, createdAt: -1 })
-      .lean();
-    return res.status(200).json(list);
+    const q = (req.query.q || '').trim();
+    const page = parseInt(req.query.page, 10);
+    const limit = parseInt(req.query.limit, 10);
+    const sortParam = (req.query.sort || '').trim();
+
+    // build match stage from q
+    const match = {};
+    if (q) {
+      const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      match.$or = [
+        { rfid_uid: re },
+        { user_name: re },
+        { mobile_no: re },
+        { village: re },
+        { rfid_serial_no: re },
+        { address: re },
+        { aadhar_no: re },
+      ];
+    }
+
+    // determine sort object (single field) or default multi-field
+    let sortObj = { last_seen: -1};
+    if (sortParam) {
+      const [field, dir] = sortParam.split(':').map(s => s.trim());
+      if (field) {
+        sortObj = { [field]: dir === 'asc' ? 1 : -1 };
+      }
+    } else {
+      // Note: MongoDB will apply first key precedence; we want to prefer last_seen then lastSeen then updatedAt etc.
+      // Build an ordered object for sort where keys are in desired order.
+      sortObj = {};
+      sortObj.last_seen = -1;
+      sortObj.lastSeen = -1;
+      sortObj.updatedAt = -1;
+      sortObj.createdAt = -1;
+    }
+
+    // Non-paginated: explicit find().sort()
+    if (!Number.isInteger(page) || !Number.isInteger(limit) || page < 1 || limit < 1) {
+      const list = await Rfid.find(match).sort(sortObj).lean();
+      return res.status(200).json(list);
+    }
+
+    // Paginated: use aggregation pipeline with $facet
+    const skip = (page - 1) * limit;
+
+    const pipeline = [
+      { $match: match },
+      // Project nothing special here; keep full documents
+      { $sort: sortObj },
+      {
+        $facet: {
+          items: [
+            { $skip: skip },
+            { $limit: limit },
+            { $replaceRoot: { newRoot: "$$ROOT" } } // ensure roots are documents
+          ],
+          totalCount: [
+            { $count: "count" }
+          ]
+        }
+      }
+    ];
+
+    const agg = await Rfid.aggregate(pipeline).exec();
+    const items = (agg[0] && agg[0].items) || [];
+    const total = (agg[0] && agg[0].totalCount && agg[0].totalCount[0] && agg[0].totalCount[0].count) || 0;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return res.status(200).json({
+      items,
+      total,
+      page,
+      limit,
+      totalPages
+    });
   } catch (err) {
     console.error('getAllRfid error:', err);
     return res.status(500).json({ message: 'Server error' });
   }
 };
 
-/**
- * @desc Get a single RFID record by ID
- * @route GET /api/rfid/:id
- */
 exports.getRfidById = async (req, res) => {
   try {
     const id = req.params.id;
@@ -263,10 +365,20 @@ exports.getRfidById = async (req, res) => {
   }
 };
 
-/**
- * @desc Update RFID record by ID
- * @route PUT /api/rfid/:id
- */
+exports.getRfidByUid = async (req, res) => {
+  try {
+    const uid = req.params.uid;
+    if (!uid) return res.status(400).json({ message: 'RFID UID missing' });
+
+    const record = await Rfid.findOne({ rfid_uid: String(uid) }).lean();
+    if (!record) return res.status(404).json({ message: 'RFID record not found' });
+    return res.status(200).json(record);
+  } catch (err) {
+    console.error('getRfidByUid error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
 exports.updateRfid = async (req, res) => {
   try {
     const id = req.params.id;
@@ -308,9 +420,38 @@ exports.updateRfid = async (req, res) => {
       updateFields.remaining_card_balance = v;
     }
 
+    // lastSeen handling:
+    let providedLastSeen = null;
+    if (data.last_seen) {
+      const d = new Date(data.last_seen);
+      if (!Number.isNaN(d.getTime())) providedLastSeen = d;
+    } else if (data.lastSeen) {
+      const d = new Date(data.lastSeen);
+      if (!Number.isNaN(d.getTime())) providedLastSeen = d;
+    }
+
+    if (providedLastSeen) {
+      // use provided
+      setBothLastSeen(updateFields, providedLastSeen);
+    } else {
+      // refresh to now to mark activity/update (this will move record to top)
+      setBothLastSeen(updateFields, new Date());
+    }
+
     const updated = await Rfid.findByIdAndUpdate(id, { $set: updateFields }, { new: true, runValidators: true });
 
     if (!updated) return res.status(404).json({ message: 'Record not found' });
+
+    // Emit updated record to clients so UI will upsert and move it to top
+    try {
+      const io = req.app && req.app.get && req.app.get('io');
+      if (io) {
+        io.emit('rfid-record-updated', { record: updated.toObject ? updated.toObject() : updated });
+      }
+    } catch (e) {
+      console.warn('updateRfid: socket emit failed', e && e.message);
+    }
+
     return res.json(updated);
   } catch (err) {
     console.error('updateRfid error:', err);
@@ -318,15 +459,22 @@ exports.updateRfid = async (req, res) => {
   }
 };
 
-/**
- * @desc Delete RFID record by ID (no history deletion)
- * @route DELETE /api/rfid/:id
- */
 exports.deleteRfid = async (req, res) => {
   try {
     const id = req.params.id;
     const removed = await Rfid.findByIdAndDelete(id);
     if (!removed) return res.status(404).json({ message: 'Record not found' });
+
+    // Emit delete event (optional) so clients can remove the record locally.
+    try {
+      const io = req.app && req.app.get && req.app.get('io');
+      if (io) {
+        io.emit('rfid-record-updated', { deletedId: id });
+      }
+    } catch (e) {
+      console.warn('deleteRfid: socket emit failed', e && e.message);
+    }
+
     return res.json({ message: 'RFID record deleted successfully' });
   } catch (err) {
     console.error('deleteRfid error:', err);
@@ -336,10 +484,6 @@ exports.deleteRfid = async (req, res) => {
 
 /** ---------- Model-backed history endpoints (if model present) ---------- */
 
-/**
- * @desc Get RFID (User) history (from RfidHistory model)
- * @route GET /api/rfid/:id/history
- */
 exports.getRfidHistory = async (req, res) => {
   try {
     if (!RfidHistory) {
@@ -372,6 +516,8 @@ exports.getRfidHistory = async (req, res) => {
         total_litres_consumed: card.total_litres_consumed,
         remaining_card_balance: card.remaining_card_balance,
         remarks: card.remarks,
+        lastSeen: card.lastSeen,
+        last_seen: card.last_seen,
       },
       history,
     });
@@ -381,10 +527,6 @@ exports.getRfidHistory = async (req, res) => {
   }
 };
 
-/**
- * @desc Add a new entry to RFID history (model-backed)
- * @route POST /api/rfid/:id/history
- */
 exports.createRfidHistory = async (req, res) => {
   try {
     if (!RfidHistory) {
@@ -422,6 +564,32 @@ exports.createRfidHistory = async (req, res) => {
     });
 
     const saved = await newEntry.save();
+
+    // Emit to clients so they know this card was active/updated
+    try {
+      const io = req.app && req.app.get && req.app.get('io');
+      if (io) {
+        try {
+          // fetch fresh card doc and update lastSeen / last_seen
+          const cardDoc = await Rfid.findById(id);
+          if (cardDoc) {
+            const lastDt = saved.timestamp || new Date();
+            cardDoc.lastSeen = lastDt;
+            cardDoc.last_seen = lastDt;
+            await cardDoc.save();
+            io.emit('rfid-record-updated', { record: cardDoc.toObject ? cardDoc.toObject() : cardDoc });
+          } else {
+            io.emit('rfid-record-updated', { rfidUid: String(id), lastSeen: saved.timestamp || new Date().toISOString(), last_seen: saved.timestamp || new Date().toISOString() });
+          }
+        } catch (e) {
+          // fallback: emit uid + timestamp
+          io.emit('rfid-record-updated', { rfidUid: String(id), lastSeen: saved.timestamp || new Date().toISOString(), last_seen: saved.timestamp || new Date().toISOString() });
+        }
+      }
+    } catch (e) {
+      console.warn('createRfidHistory: failed to emit socket event', e && e.message);
+    }
+
     return res.status(201).json({ message: 'RFID history entry created successfully', data: saved });
   } catch (err) {
     console.error('[createRfidHistory] error:', err);
@@ -431,10 +599,6 @@ exports.createRfidHistory = async (req, res) => {
 
 /** ---------- Proxy-backed history endpoint (normalized + sorted) ---------- */
 
-/**
- * @desc Fetch history from device proxy and return normalized, timestamp-sorted results
- * @route GET /api/rfid/:id/proxy-history
- */
 exports.getProxyHistory = async (req, res) => {
   try {
     const uid = req.params.id;
@@ -476,30 +640,32 @@ exports.getProxyHistory = async (req, res) => {
       return tb - ta;
     });
 
-    // --- NEW: update the Rfid.lastSeen for this uid using newest record's timestamp ---
+    // --- update the Rfid.lastSeen / last_seen for this uid using newest record's timestamp ---
     try {
-      // pick the newest timestamp (first item after sort) if available
       const newest = normalized.find((x) => x && x.timestamp);
       const lastSeenDate = newest ? new Date(newest.timestamp) : new Date();
 
-      // update the Rfid document that matches rfid_uid === uid
-      // do not upsert — if card doesn't exist we choose not to create one automatically
       const updateResult = await Rfid.findOneAndUpdate(
         { rfid_uid: String(uid) },
-        { $set: { lastSeen: lastSeenDate } },
+        { $set: { lastSeen: lastSeenDate, last_seen: lastSeenDate } },
         { new: true }
       );
 
       if (!updateResult) {
-        // optional: log when no matching card found (helps debug)
         console.warn(`getProxyHistory: no Rfid document found for uid=${uid} to update lastSeen`);
       } else {
-        // debug log (remove in production if noisy)
         console.log(`getProxyHistory: updated lastSeen for uid=${uid} -> ${lastSeenDate.toISOString()}`);
+        try {
+          const io = req.app && req.app.get && req.app.get('io');
+          if (io) {
+            io.emit('rfid-record-updated', { record: updateResult.toObject ? updateResult.toObject() : updateResult });
+          }
+        } catch (e) {
+          console.warn('getProxyHistory: failed to emit socket event', e && e.message);
+        }
       }
     } catch (updateErr) {
       console.error(`getProxyHistory: failed to update lastSeen for uid=${uid}:`, updateErr && updateErr.message);
-      // Continue — we don't want a lastSeen update failure to block returning the history
     }
 
     return res.status(200).json({

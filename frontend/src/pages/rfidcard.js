@@ -1,259 +1,294 @@
+// src/pages/rfidcard.js
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "../styles/pages.css";
 
+function Icon({ name, size = 16 }) {
+  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", xmlns: "http://www.w3.org/2000/svg" };
+  if (name === 'chev-right') return (
+    <svg {...common}><path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+  );
+  if (name === 'chev-left') return (
+    <svg {...common}><path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+  );
+  if (name === 'dots') return (
+    <svg {...common}><path d="M12 5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm0 5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm0 5a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" fill="currentColor"/></svg>
+  );
+  return null;
+}
+
 export default function RfidCard() {
   const navigate = useNavigate();
+
+  // data state
   const [records, setRecords] = useState([]);
   const [filteredRecords, setFilteredRecords] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // search + debounce
   const [searchQuery, setSearchQuery] = useState("");
+  const searchDebounceRef = useRef(null);
+
+  // pagination (client-side)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // UI hints
   const [showRightHint, setShowRightHint] = useState(false);
 
   // refs
-  const isMountedRef = useRef(true);
   const containerRef = useRef(null);
   const tableWrapperRef = useRef(null);
-  const evaluateTimeoutRef = useRef(null);
-  const latestRecordsRef = useRef(records);
-  useEffect(() => {
-    latestRecordsRef.current = records;
-  }, [records]);
+  const socketRef = useRef(null);
+  const isMountedRef = useRef(true);
+  const pollIntervalRef = useRef(null);
 
-  // mount/unmount
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
+  // helpers: get ms timestamp from record (prefers snake_case then camelCase)
+  const getRecordTime = useCallback((r) => {
+    if (!r) return 0;
+    const tryDate = (v) => {
+      if (!v) return 0;
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? 0 : d.getTime();
     };
+    return tryDate(r.last_seen) || tryDate(r.lastSeen) || tryDate(r.updatedAt) || tryDate(r.createdAt) || 0;
   }, []);
 
-  /** 🧠 Sort helper — prefer lastSeen, fallback to updatedAt/createdAt */
+  // stable sort newest-first using getRecordTime
   const sortByLastSeen = useCallback((list) => {
     return [...list].sort((a, b) => {
-      const ta =
-        (a && a.lastSeen && new Date(a.lastSeen).getTime()) ||
-        (a && a.updatedAt && new Date(a.updatedAt).getTime()) ||
-        (a && a.createdAt && new Date(a.createdAt).getTime()) ||
-        0;
-      const tb =
-        (b && b.lastSeen && new Date(b.lastSeen).getTime()) ||
-        (b && b.updatedAt && new Date(b.updatedAt).getTime()) ||
-        (b && b.createdAt && new Date(b.createdAt).getTime()) ||
-        0;
-      return tb - ta;
+      const ta = getRecordTime(a);
+      const tb = getRecordTime(b);
+      if (tb !== ta) return tb - ta;
+      if (a && b && a._id && b._id) return String(a._id).localeCompare(String(b._id));
+      return 0;
     });
-  }, []);
+  }, [getRecordTime]);
 
-  /** Fetch a single RFID by trying to find it in the full list (safe when /:id expects ObjectId) */
-  const findRecordInList = useCallback(async (uid) => {
-    if (!uid) return null;
-    try {
-      const res = await axios.get("/api/rfid", { timeout: 10000 });
-      let all = [];
-      if (Array.isArray(res.data)) all = res.data;
-      else if (Array.isArray(res.data.data)) all = res.data.data;
-      else if (Array.isArray(res.data.items)) all = res.data.items;
-      else if (res.data && typeof res.data === "object") {
-        const arr = Object.values(res.data).find((v) => Array.isArray(v));
-        all = arr || [];
-      }
+  // normalize id helper
+  const normalizeId = useCallback((r) => String(r && (r.rfid_uid || r.rfidUid || r._id || "")).trim().toLowerCase(), []);
 
-      const lowerUid = String(uid).trim().toLowerCase();
-      const found = all.find((r) => String(r.rfid_uid || r.rfidUid || r._id || "")
-        .trim()
-        .toLowerCase() === lowerUid);
-      return found || null;
-    } catch (err) {
-      console.warn("findRecordInList error:", err && (err.message || err));
-      return null;
-    }
-  }, []);
+  // Upsert incoming record into state and filtered state; move to top and sort
+  const upsertRecord = useCallback((incoming) => {
+    if (!incoming) return;
 
-  /** 📦 Fetch RFID records from backend */
-  const fetchRecords = useCallback(async () => {
-    const controller = new AbortController();
-    try {
-      if (!isMountedRef.current) return;
-      setLoading(true);
-
-      const res = await axios.get("/api/rfid", {
-        signal: controller.signal,
-        timeout: 15000,
+    // Records state
+    setRecords((prev = []) => {
+      const copy = Array.isArray(prev) ? [...prev] : [];
+      const idx = copy.findIndex((r) => {
+        if (!r) return false;
+        if (incoming._id && r._id && String(r._id) === String(incoming._id)) return true;
+        if (incoming.rfid_uid && r.rfid_uid && String(r.rfid_uid) === String(incoming.rfid_uid)) return true;
+        if (incoming.rfidUid && r.rfid_uid && String(r.rfid_uid) === String(incoming.rfidUid)) return true;
+        return false;
       });
+      if (idx !== -1) copy.splice(idx, 1);
+      copy.unshift(incoming);
+      return sortByLastSeen(copy);
+    });
 
-      let data = [];
-      if (Array.isArray(res.data)) data = res.data;
-      else if (Array.isArray(res.data.items)) data = res.data.items;
-      else if (Array.isArray(res.data.data)) data = res.data.data;
-      else if (Array.isArray(res.data.records)) data = res.data.records;
-      else if (res.data && typeof res.data === "object") {
-        const arr = Object.values(res.data).find((v) => Array.isArray(v));
-        data = arr || [];
-      }
+    // Filtered state
+    setFilteredRecords((prev = []) => {
+      const copy = Array.isArray(prev) ? [...prev] : [];
+      const idx = copy.findIndex((r) => {
+        if (!r) return false;
+        if (incoming._id && r._id && String(r._id) === String(incoming._id)) return true;
+        if (incoming.rfid_uid && r.rfid_uid && String(r.rfid_uid) === String(incoming.rfid_uid)) return true;
+        if (incoming.rfidUid && r.rfid_uid && String(r.rfid_uid) === String(incoming.rfidUid)) return true;
+        return false;
+      });
+      if (idx !== -1) copy.splice(idx, 1);
+      // optional: only insert if it matches current search filter — but simpler to always insert
+      copy.unshift(incoming);
+      return sortByLastSeen(copy);
+    });
 
-      const sorted = sortByLastSeen(data);
-      if (isMountedRef.current) {
-        setRecords(sorted);
-        setFilteredRecords(sorted);
-      }
-    } catch (err) {
-      if (err.name === "CanceledError" || axios.isCancel?.(err)) {
-        // aborted
-      } else {
-        console.error("Fetch Error:", err);
-        if (isMountedRef.current) alert("Failed to load RFID records. See console for details.");
-      }
-    } finally {
-      if (isMountedRef.current) setLoading(false);
-    }
-    return () => controller.abort();
+    // move to first page to show the updated item
+    setCurrentPage(1);
   }, [sortByLastSeen]);
 
-  // initial + polling
-  useEffect(() => {
-    fetchRecords();
-    const timer = setInterval(() => {
-      if (isMountedRef.current) fetchRecords();
-    }, 15000);
-    return () => clearInterval(timer);
-  }, [fetchRecords]);
+  // Remove record by id
+  const removeRecordById = useCallback((id) => {
+    if (!id) return;
+    setRecords((prev = []) => (prev || []).filter((r) => String(r._id) !== String(id)));
+    setFilteredRecords((prev = []) => (prev || []).filter((r) => String(r._id) !== String(id)));
+  }, []);
 
-  /** Handle incoming global event when a card's history was updated
-   *  Strategy:
-   *   1) Immediately move any local matching row to top for instant feedback.
-   *   2) Fetch the full list and find the updated row by rfid_uid (case-insensitive).
-   *   3) Insert the fresh row at top (avoids calling /api/rfid/:id which expects ObjectId).
-   */
+  // Initial + periodic fetch
   useEffect(() => {
-    let mounted = true;
-    const normalizeId = (r) => String(r && (r.rfid_uid || r.rfidUid || r._id || "")).trim().toLowerCase();
-
-    const handler = async (e) => {
-      if (!mounted) return;
+    isMountedRef.current = true;
+    const fetchRecords = async () => {
       try {
-        const detail = e && e.detail ? e.detail : null;
-        if (!detail) return;
-        const rawIdent = detail.rfidUid || detail.rfid_uid || detail.uid || detail.id || detail._id || "";
-        const rfidUid = String(rawIdent).trim();
-        if (!rfidUid) return;
-        const lowerUid = rfidUid.toLowerCase();
-
-        // 1) Instant local move if present
-        setRecords((prev) => {
-          const idx = prev.findIndex((r) => normalizeId(r) === lowerUid);
-          if (idx === -1) return prev;
-          const found = prev[idx];
-          const rest = prev.filter((_, i) => i !== idx);
-          return [found, ...rest];
-        });
-        setFilteredRecords((prev) => {
-          const idx = prev.findIndex((r) => normalizeId(r) === lowerUid);
-          if (idx === -1) return prev;
-          const found = prev[idx];
-          const rest = prev.filter((_, i) => i !== idx);
-          return [found, ...rest];
-        });
-
-        // 2) Ensure authoritative fresh record from server (search list)
-        const fresh = await findRecordInList(rfidUid);
-        if (fresh && isMountedRef.current) {
-          setRecords((prev) => {
-            const filtered = prev.filter((x) => String(x._id || x.rfid_uid || "").trim().toLowerCase() !== String(fresh._id || fresh.rfid_uid || "").trim().toLowerCase());
-            const inserted = [fresh, ...filtered];
-            return sortByLastSeen(inserted);
-          });
-          setFilteredRecords((prev) => {
-            const filtered = prev.filter((x) => String(x._id || x.rfid_uid || "").trim().toLowerCase() !== String(fresh._id || fresh.rfid_uid || "").trim().toLowerCase());
-            const inserted = [fresh, ...filtered];
-            return sortByLastSeen(inserted);
-          });
+        setLoading(true);
+        const res = await axios.get('/api/rfid', { timeout: 15000 });
+        let data = [];
+        if (Array.isArray(res.data)) data = res.data;
+        else if (Array.isArray(res.data.items)) data = res.data.items;
+        else if (Array.isArray(res.data.data)) data = res.data.data;
+        else if (Array.isArray(res.data.records)) data = res.data.records;
+        else if (res.data && typeof res.data === 'object') {
+          const arr = Object.values(res.data).find((v) => Array.isArray(v));
+          data = arr || [];
+        }
+        const sorted = sortByLastSeen(data);
+        if (isMountedRef.current) {
+          setRecords(sorted);
+          setFilteredRecords(sorted);
+          setCurrentPage(1);
         }
       } catch (err) {
-        console.warn("rfid-history-updated handler error:", err);
+        console.error('Fetch Error:', err);
+      } finally {
+        if (isMountedRef.current) setLoading(false);
       }
     };
 
-    window.addEventListener("rfid-history-updated", handler);
+    // initial fetch
+    fetchRecords();
+
+    // poll every 15s (you can increase or remove if you have socket)
+    pollIntervalRef.current = setInterval(fetchRecords, 15000);
+
     return () => {
-      mounted = false;
-      window.removeEventListener("rfid-history-updated", handler);
+      isMountedRef.current = false;
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
-  }, [findRecordInList, sortByLastSeen]);
+  }, [sortByLastSeen]);
 
-  /** 🔍 Safe search helper and filter */
-  const safeLower = (v) => {
-    try {
-      return String(v ?? "").toLowerCase();
-    } catch (e) {
-      return "";
-    }
-  };
-
-  const handleSearch = (e) => {
-    const raw = e?.target?.value ?? "";
-    const q = safeLower(raw);
-    setSearchQuery(raw);
-
-    if (!q) {
-      setFilteredRecords(records);
+  // Search with debounce (client-side filter)
+  useEffect(() => {
+    // apply immediate if empty query
+    if (!searchQuery) {
+      setFilteredRecords(sortByLastSeen(records));
+      setCurrentPage(1);
       return;
     }
 
-    const filtered = records.filter((r) => {
-      if (!r) return false;
-      const checks = [
-        safeLower(r.user_name),
-        safeLower(r.mobile_no),
-        safeLower(r.village),
-        safeLower(r.rfid_uid),
-        safeLower(r.rfid_serial_no),
-        safeLower(r.address),
-        safeLower(r.aadhar_no),
-      ];
-      return checks.some((fieldVal) => fieldVal.includes(q));
-    });
+    const q = String(searchQuery || "").trim().toLowerCase();
 
-    setFilteredRecords(filtered);
-  };
+    // debounce small CPU work (keeps typing smooth)
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      const filtered = (records || []).filter((r) => {
+        if (!r) return false;
+        const checks = [
+          String(r.user_name ?? "").toLowerCase(),
+          String(r.mobile_no ?? "").toLowerCase(),
+          String(r.village ?? "").toLowerCase(),
+          String(r.rfid_uid ?? "").toLowerCase(),
+          String(r.rfid_serial_no ?? "").toLowerCase(),
+          String(r.address ?? "").toLowerCase(),
+          String(r.aadhar_no ?? "").toLowerCase(),
+        ];
+        return checks.some((f) => f.includes(q));
+      });
+      setFilteredRecords(sortByLastSeen(filtered));
+      setCurrentPage(1);
+    }, 220);
 
-  const handleEditNavigate = (rec) =>
-    navigate(`/editrfidcard/${rec._id}`, { state: rec });
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchQuery, records, sortByLastSeen]);
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this record?")) return;
+  // socket listeners for live upserts and deletes
+  useEffect(() => {
+    // try to pick socket from window (if you initialize socket elsewhere and attach to window.io)
+    let socket = null;
     try {
-      setLoading(true);
-      await axios.delete(`/api/rfid/${id}`);
-      const updated = records.filter((r) => r._id !== id);
-      if (isMountedRef.current) {
-        setRecords(updated);
-        setFilteredRecords(updated);
+      if (window && window.io) {
+        // if window.io is a function (socket.io factory)
+        if (typeof window.io === "function") socket = window.io();
+        else socket = window.io;
+      } else if (window && window.socket) {
+        socket = window.socket;
       }
-    } catch (err) {
-      console.error("Delete Error:", err);
-      alert("Failed to delete record.");
-    } finally {
-      if (isMountedRef.current) setLoading(false);
+    } catch (e) {
+      console.warn("Socket init error:", e);
+      socket = null;
     }
-  };
 
-  const handleViewHistory = (rec) => {
-    const uid =
-      rec && rec.rfid_uid && String(rec.rfid_uid).trim() !== ""
-        ? rec.rfid_uid
-        : rec._id;
-    navigate(`/rfidhistory/${encodeURIComponent(uid)}`, { state: { record: rec } });
-  };
+    // If you don't have a global socket, attempt a connect of socket.io-client:
+    // NOTE: uncomment following lines if you use socket.io-client and haven't created socket elsewhere.
+    /*
+    if (!socket) {
+      try {
+        // eslint-disable-next-line global-require
+        const ioClient = require("socket.io-client");
+        socket = ioClient(); // connects to same origin
+      } catch (e) {
+        socket = null;
+      }
+    }
+    */
 
-  /** ⬇️ Download CSV */
+    if (!socket) return () => {};
+
+    socketRef.current = socket;
+
+    const onUpdate = (payload) => {
+      if (!payload) return;
+      // removed payload.deletedId
+      if (payload.deletedId) {
+        removeRecordById(payload.deletedId);
+        return;
+      }
+      // normal path: record object in payload
+      if (payload.record) {
+        upsertRecord(payload.record);
+        return;
+      }
+      // sometimes server emits rfidUid/lastSeen
+      const uid = payload.rfid_uid || payload.rfidUid || payload.uid;
+      if (uid) {
+        // find matching record and update its lastSeen/last_seen, move to top
+        setRecords((prev = []) => {
+          const copy = Array.isArray(prev) ? [...prev] : [];
+          const idx = copy.findIndex((r) => r && (String(r.rfid_uid) === String(uid) || String(r.rfidUid) === String(uid) || String(r._id) === String(uid)));
+          if (idx !== -1) {
+            const item = { ...copy[idx], lastSeen: payload.lastSeen || payload.last_seen || new Date().toISOString(), last_seen: payload.lastSeen || payload.last_seen || new Date().toISOString() };
+            copy.splice(idx, 1);
+            copy.unshift(item);
+            return sortByLastSeen(copy);
+          }
+          return prev;
+        });
+        setFilteredRecords((prev = []) => {
+          const copy = Array.isArray(prev) ? [...prev] : [];
+          const idx = copy.findIndex((r) => r && (String(r.rfid_uid) === String(uid) || String(r.rfidUid) === String(uid) || String(r._id) === String(uid)));
+          if (idx !== -1) {
+            const item = { ...copy[idx], lastSeen: payload.lastSeen || payload.last_seen || new Date().toISOString(), last_seen: payload.lastSeen || payload.last_seen || new Date().toISOString() };
+            copy.splice(idx, 1);
+            copy.unshift(item);
+            return sortByLastSeen(copy);
+          }
+          return prev;
+        });
+        setCurrentPage(1);
+      }
+    };
+
+    const onDeleted = (payload) => {
+      const id = payload && (payload.deletedId || payload._id);
+      if (id) removeRecordById(id);
+    };
+
+    socket.on("rfid-record-updated", onUpdate);
+    socket.on("rfid-record-deleted", onDeleted);
+
+    return () => {
+      try {
+        socket.off("rfid-record-updated", onUpdate);
+        socket.off("rfid-record-deleted", onDeleted);
+      } catch (e) { /* ignore */ }
+      socketRef.current = null;
+    };
+  }, [upsertRecord, removeRecordById, sortByLastSeen]);
+
+  // helpers: download CSV
   const handleDownload = () => {
-    if (!filteredRecords || filteredRecords.length === 0) {
-      alert("No records to download!");
-      return;
-    }
-
+    if (!filteredRecords || filteredRecords.length === 0) { alert('No records to download!'); return; }
     const csvHeaders = [
       "S.No",
       "RFID Serial No",
@@ -303,32 +338,51 @@ export default function RfidCard() {
     URL.revokeObjectURL(url);
   };
 
-  // --- scroll hint utils ---
-  const atRightEdge = (w) => w.scrollLeft + w.clientWidth >= w.scrollWidth - 8;
-  const isOverflowing = (w) => w.scrollWidth > w.clientWidth + 2;
+  // edit / delete / view history handlers
+  const handleEditNavigate = (rec) => navigate(`/editrfidcard/${rec._id}`, { state: rec });
 
-  const evaluateHint = (wrapper) => {
-    if (!wrapper) return;
-    if (!isOverflowing(wrapper)) {
-      if (isMountedRef.current) setShowRightHint(false);
-      return;
-    }
-    if (atRightEdge(wrapper)) {
-      if (isMountedRef.current) setShowRightHint(false);
-    } else {
-      if (isMountedRef.current) setShowRightHint(true);
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this record?')) return;
+    try {
+      setLoading(true);
+      await axios.delete(`/api/rfid/${id}`);
+      removeRecordById(id);
+    } catch (err) {
+      console.error(err);
+      alert('Delete failed');
+    } finally {
+      setLoading(false);
     }
   };
+
+  const handleViewHistory = (rec) => {
+    const uid = rec && rec.rfid_uid && String(rec.rfid_uid).trim() !== '' ? rec.rfid_uid : rec._id;
+    navigate(`/rfidhistory/${encodeURIComponent(uid)}`, { state: { record: rec } });
+  };
+
+  // search input handler (updates searchQuery with debounce)
+  const onSearchInput = (e) => {
+    const v = e.target.value;
+    // immediate UI feedback: set the input string (but filtering is debounced in effect above)
+    setSearchQuery(v);
+  };
+
+  // scroll hint utils
+  const atRightEdge = (w) => w.scrollLeft + w.clientWidth >= w.scrollWidth - 8;
+  const isOverflowing = (w) => w.scrollWidth > w.clientWidth + 2;
 
   useEffect(() => {
     const wrapper = tableWrapperRef.current;
     if (!wrapper) return;
 
-    if (evaluateTimeoutRef.current) clearTimeout(evaluateTimeoutRef.current);
-    evaluateTimeoutRef.current = setTimeout(() => evaluateHint(wrapper), 100);
+    const evaluateHint = () => {
+      if (!isOverflowing(wrapper)) { setShowRightHint(false); return; }
+      if (atRightEdge(wrapper)) setShowRightHint(false); else setShowRightHint(true);
+    };
 
-    const onScroll = () => evaluateHint(wrapper);
-    const onResize = () => evaluateHint(wrapper);
+    evaluateHint();
+    const onScroll = () => evaluateHint();
+    const onResize = () => evaluateHint();
 
     wrapper.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onResize);
@@ -336,10 +390,6 @@ export default function RfidCard() {
     return () => {
       wrapper.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
-      if (evaluateTimeoutRef.current) {
-        clearTimeout(evaluateTimeoutRef.current);
-        evaluateTimeoutRef.current = null;
-      }
     };
   }, [filteredRecords]);
 
@@ -347,16 +397,36 @@ export default function RfidCard() {
     const wrapper = tableWrapperRef.current;
     if (!wrapper) return;
     wrapper.scrollTo({ left: wrapper.scrollWidth, behavior: "smooth" });
-    setTimeout(() => {
-      if (isMountedRef.current) setShowRightHint(false);
-    }, 420);
+    setTimeout(() => setShowRightHint(false), 420);
   };
+  const onHintKeyDown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToEndAndToggle(); } };
 
-  const onHintKeyDown = (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      scrollToEndAndToggle();
-    }
+  // pagination calculations (client-side)
+  const totalItems = filteredRecords.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const paginatedRecords = filteredRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const goToPage = (p) => {
+    const page = Math.max(1, Math.min(totalPages, Number(p) || 1));
+    setCurrentPage(page);
+    if (tableWrapperRef.current) tableWrapperRef.current.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+  };
+  const handlePageSizeChange = (e) => { const newSize = Number(e.target.value) || 10; setPageSize(newSize); setCurrentPage(1); };
+
+  const getPageButtons = () => {
+    const maxButtons = 7;
+    if (totalPages <= maxButtons) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const windowSize = 5; const half = Math.floor(windowSize / 2);
+    let start = Math.max(2, currentPage - half);
+    let end = Math.min(totalPages - 1, currentPage + half);
+    if (currentPage <= half + 1) { start = 2; end = 2 + windowSize - 1; }
+    if (currentPage >= totalPages - (half + 1)) { start = totalPages - (windowSize); end = totalPages - 1; }
+    const buttons = [1];
+    if (start > 2) buttons.push('left-ellipsis');
+    for (let i = start; i <= end; i++) buttons.push(i);
+    if (end < totalPages - 1) buttons.push('right-ellipsis');
+    buttons.push(totalPages);
+    return buttons;
   };
 
   const columns = [
@@ -422,6 +492,10 @@ export default function RfidCard() {
     .data-table td { padding: 12px 14px; border-bottom: 1px solid #eee; background: #fff; white-space: nowrap; }
     .data-table tr:hover td { background: rgba(142, 36, 170, 0.04); }
     .action-buttons { display: flex; gap: 8px; align-items: center; }
+    .pagination-controls { display:flex; gap:12px; align-items:center; justify-content:flex-end; margin-top:12px; }
+    .page-btn { background:#fff; border:1px solid #e6eef8; padding:8px 10px; border-radius:8px; cursor:pointer; min-width:44px; text-align:center; }
+    .page-btn.active { background:linear-gradient(90deg,#6366f1,#3b82f6); color:#fff; border:0; }
+    .select { padding:8px 10px; border-radius:8px; border:1px solid #e6eef8; }
   `;
 
   return (
@@ -444,7 +518,7 @@ export default function RfidCard() {
                   className="search-input"
                   placeholder="🔍 Search by name, mobile, village, RFID UID or Serial No..."
                   value={searchQuery}
-                  onChange={handleSearch}
+                  onChange={onSearchInput}
                   style={{
                     width: "86%",
                     maxWidth: "600px",
@@ -491,6 +565,7 @@ export default function RfidCard() {
                   padding: 0,
                 }}
               >
+                {/* ORIGINAL TABLE: kept unchanged as requested */}
                 <table className="data-table" style={{ minWidth: 1200 }}>
                   <thead>
                     <tr>
@@ -500,16 +575,16 @@ export default function RfidCard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {!filteredRecords || filteredRecords.length === 0 ? (
+                    {!paginatedRecords || paginatedRecords.length === 0 ? (
                       <tr>
                         <td colSpan={columns.length} className="table-empty">
                           {loading ? "Loading records..." : "No records found"}
                         </td>
                       </tr>
                     ) : (
-                      filteredRecords.map((r, i) => (
+                      paginatedRecords.map((r, i) => (
                         <tr key={r._id || i}>
-                          <td>{i + 1}</td>
+                          <td>{(currentPage - 1) * pageSize + i + 1}</td>
                           <td>{r.rfid_serial_no || "—"}</td>
                           <td>
                             <button
@@ -592,6 +667,42 @@ export default function RfidCard() {
                   </svg>
                 </div>
               </div>
+
+              {/* MODERN PAGINATION UI (table untouched) */}
+              <div className="pagination-controls">
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <label style={{ color: '#6b7280' }}>Show</label>
+                  <select value={pageSize} onChange={handlePageSizeChange} className="select">
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <label style={{ color: '#6b7280' }}>of {totalItems} items</label>
+                </div>
+
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <button className="page-btn" onClick={() => goToPage(1)} disabled={currentPage === 1}>First</button>
+                  <button className="page-btn" onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1}>Prev</button>
+
+                  {getPageButtons().map((p, idx) => {
+                    if (p === 'left-ellipsis' || p === 'right-ellipsis') return (<div key={p + idx} className="page-btn" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}><Icon name="dots" /></div>);
+                    const isActive = p === currentPage;
+                    return (
+                      <button key={p} className={`page-btn ${isActive ? 'active' : ''}`} onClick={() => goToPage(p)} aria-current={isActive ? 'page' : undefined}>{p}</button>
+                    );
+                  })}
+
+                  <button className="page-btn" onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages}>Next</button>
+                  <button className="page-btn" onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages}>Last</button>
+
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <label style={{ color: '#6b7280' }}>Go to</label>
+                    <input type="number" min={1} max={totalPages} value={currentPage} onChange={(e) => goToPage(e.target.value)} className="select" style={{ width:72 }} />
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>

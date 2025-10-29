@@ -5,7 +5,7 @@ const RfidSchema = new mongoose.Schema(
   {
     // RFID info (optional during onboarding)
     rfid_serial_no: { type: String, required: true, trim: true, default: '' },
-    rfid_uid: { type: String, required: true, trim: true, default: '' },
+    rfid_uid: { type: String, trim: true, default: null, index: { unique: true, sparse: true } },
 
     // Personal info
     user_name: { type: String, required: true, trim: true },
@@ -25,7 +25,7 @@ const RfidSchema = new mongoose.Schema(
     remaining_card_balance: { type: Number, default: 0, min: 0 },
 
     // New field 👇
-    lastSeen: { type: Date, default: null, index: true },
+    last_seen: { type: Date, default: null, index: true },
 
     // Extras
     remarks: { type: String, default: '', trim: true }
