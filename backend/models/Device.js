@@ -15,6 +15,13 @@ const DeviceSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    // New field for today's dispensed litres (matches "Today's Dispensed (L)" UI)
+    todays_dispensed_litres: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
     total_dispensed_litres: {
       type: Number,
       required: true,

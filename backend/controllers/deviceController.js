@@ -23,6 +23,7 @@ exports.createDevice = async (req, res) => {
     const {
       device_id,
       price_per_ltr,
+      todays_dispensed_litres = 0,
       total_dispensed_litres = 0,
       location = 'Unknown',
       status = 'ACTIVE',
@@ -47,6 +48,12 @@ exports.createDevice = async (req, res) => {
       return res.status(400).json({ message: 'total_dispensed_litres must be a number >= 0' });
     }
 
+    // Validate todays_dispensed_litres
+    const todayLitresNum = Number(todays_dispensed_litres || 0);
+    if (isNaN(todayLitresNum) || todayLitresNum < 0) {
+      return res.status(400).json({ message: 'todays_dispensed_litres must be a number >= 0' });
+    }
+
     // Validate status
     const normStatus = (String(status || 'ACTIVE')).toUpperCase();
     if (!ALLOWED_STATUSES.includes(normStatus)) {
@@ -63,6 +70,7 @@ exports.createDevice = async (req, res) => {
     const device = new Device({
       device_id: normalizedDeviceId,
       price_per_ltr: priceNum,
+      todays_dispensed_litres: todayLitresNum,
       total_dispensed_litres: totalLitresNum,
       location: (location && String(location).trim()) || 'Unknown',
       status: normStatus,
@@ -71,7 +79,6 @@ exports.createDevice = async (req, res) => {
 
     await device.save();
     console.log('[createDevice] created:', device._id);
-    // return the saved document (convert to plain object for consistency)
     const saved = (await Device.findById(device._id).lean()) || device;
     return res.status(201).json(saved);
   } catch (err) {
@@ -122,7 +129,7 @@ exports.listDevices = async (req, res) => {
 };
 
 /**
- * Get single device with latest price & price history
+ * Get single device
  * GET /api/device/:id
  */
 exports.getDevice = async (req, res) => {
@@ -176,6 +183,13 @@ exports.updateDevice = async (req, res) => {
         return res.status(400).json({ message: 'total_dispensed_litres must be a number >= 0' });
       }
       updates.total_dispensed_litres = Number(updates.total_dispensed_litres);
+    }
+
+    if (updates.todays_dispensed_litres !== undefined && updates.todays_dispensed_litres !== null) {
+      if (isNaN(Number(updates.todays_dispensed_litres)) || Number(updates.todays_dispensed_litres) < 0) {
+        return res.status(400).json({ message: 'todays_dispensed_litres must be a number >= 0' });
+      }
+      updates.todays_dispensed_litres = Number(updates.todays_dispensed_litres);
     }
 
     if (updates.status !== undefined && updates.status !== null) {
