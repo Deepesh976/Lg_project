@@ -1,5 +1,6 @@
 // controllers/rfidController.js
 const axios = require('axios');
+const mongoose = require('mongoose');
 const Rfid = require('../models/Rfid');
 
 // Try to require the history model (support common misspelling fallback)
@@ -376,6 +377,74 @@ exports.getRfidByUid = async (req, res) => {
   } catch (err) {
     console.error('getRfidByUid error:', err);
     return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * New endpoint:
+ * GET /api/rfid/active?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * - runs aggregation on `live_rfid_transactions` to find distinct metadata.rfid_uid values in the range
+ * - returns matching Rfid documents as { items: [...], total: n }
+ */
+exports.getActiveRfidsInRange = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    // Parse dates using existing helper to be flexible
+    let fromDate = null;
+    let toDate = null;
+    if (from) fromDate = tryParseFlexibleDate(from);
+    if (to) toDate = tryParseFlexibleDate(to);
+
+    // If parse failed but value provided, try direct Date
+    if (from && !fromDate) {
+      const d = new Date(from);
+      if (!Number.isNaN(d.getTime())) fromDate = d;
+    }
+    if (to && !toDate) {
+      const d = new Date(to);
+      if (!Number.isNaN(d.getTime())) toDate = d;
+    }
+
+    // set inclusive range defaults if not provided
+    const minTs = new Date(-8640000000000000);
+    const maxTs = new Date(8640000000000000);
+    const gte = fromDate || minTs;
+    const lte = toDate ? new Date(new Date(toDate).setHours(23,59,59,999)) : maxTs;
+
+    // Validate
+    if (from && !(gte instanceof Date) || to && !(lte instanceof Date)) {
+      return res.status(400).json({ message: "Invalid 'from' or 'to' date. Use a supported date format (YYYY-MM-DD, DD/MM/YYYY, ISO, etc)." });
+    }
+
+    // use native collection for aggregation
+    const coll = mongoose.connection.db.collection('live_rfid_transactions');
+
+    const pipeline = [
+      { $match: { timestamp: { $gte: gte, $lte: lte } } },
+      { $group: { _id: '$metadata.rfid_uid' } },
+      { $match: { _id: { $ne: null } } },
+      { $project: { rfid_uid: '$_id', _id: 0 } }
+    ];
+
+    const aggRes = await coll.aggregate(pipeline).toArray();
+    const uids = aggRes.map(d => d.rfid_uid).filter(Boolean);
+
+    if (!uids || uids.length === 0) {
+      return res.status(200).json({ items: [], total: 0 });
+    }
+
+    // find matching user records
+    const users = await Rfid.find({ rfid_uid: { $in: uids } }).lean().exec();
+
+    // order results to follow the uids order (keep only found docs)
+    const userByUid = new Map(users.map(u => [String(u.rfid_uid), u]));
+    const ordered = uids.map(uid => userByUid.get(String(uid))).filter(Boolean);
+
+    return res.status(200).json({ items: ordered, total: ordered.length });
+  } catch (err) {
+    console.error('getActiveRfidsInRange error:', err);
+    return res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 

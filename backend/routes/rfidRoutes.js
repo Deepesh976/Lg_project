@@ -14,6 +14,13 @@ router.post('/', controller.createRfid);
 // e.g. GET /api/rfid/uid/ABC123
 router.get('/uid/:uid', controller.getRfidByUid);
 
+/**
+ * NEW: Active RFIDs in a date range
+ * Example: GET /api/rfid/active?from=2025-10-27&to=2025-10-30
+ * This must be before '/:id' so "active" isn't treated as an ID.
+ */
+router.get('/active', controller.getActiveRfidsInRange);
+
 // HISTORY routes must come BEFORE generic '/:id'
 router.get('/:id/history', validateObjectId, controller.getRfidHistory);
 router.post('/:id/history', validateObjectId, controller.createRfidHistory);

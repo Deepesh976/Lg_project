@@ -216,7 +216,7 @@ const Login = () => {
       }
 
       // navigate to protected route
-      navigate('/rfidcard', { replace: true });
+      navigate('/device', { replace: true });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('Login error (detailed):', err);

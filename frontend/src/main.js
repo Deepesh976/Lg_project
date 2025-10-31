@@ -5,7 +5,6 @@ import { io as ioClient } from 'socket.io-client';
 
 import Login from './components/auth/login';
 import Navbar from './components/Navbar/navbar';
-import DeviceAnalysis from './pages/deviceAnalysis';
 import RfidCard from './pages/rfidcard';
 import EditRfidCard from './pages/editrfidcard';
 import RfidHistory from './pages/rfidhistory';
@@ -110,7 +109,6 @@ function AppRoutes() {
 
         {/* Protected routes (only when ProtectedRoutes allows) */}
         <Route element={<ProtectedRoutes />}>
-          <Route path="/deviceAnalysis" element={<WithNavbar Component={DeviceAnalysis} />} />
           <Route path="/rfidcard" element={<WithNavbar Component={RfidCard} />} />
           <Route path="/rfidhistory/:id" element={<WithNavbar Component={RfidHistory} />} />
           <Route path="/editrfid/:id" element={<WithNavbar Component={EditRfidCard} />} />

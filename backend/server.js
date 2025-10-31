@@ -12,7 +12,6 @@ const { Server: SocketIOServer } = require('socket.io');
 
 // ==== Route Imports ====
 const deviceRoutes = require('./routes/deviceRoutes');
-const analysisRoutes = require('./routes/analysisRoutes');
 const rfidRoutes = require('./routes/rfidRoutes');
 const proxyAtw = require('./routes/proxyAtw');
 const adminRoutes = require('./routes/adminRoutes');
@@ -52,7 +51,6 @@ app.use((req, res, next) => {
 
 // ==== API Routes ====
 app.use('/api/device', deviceRoutes); // ✅ Devices section
-app.use('/api/analysis', analysisRoutes); // ✅ Device Analysis section
 app.use('/api/rfid', rfidRoutes); // ✅ RFID Card section
 app.use('/api/proxy', proxyAtw);
 app.use('/api/admin', adminRoutes);

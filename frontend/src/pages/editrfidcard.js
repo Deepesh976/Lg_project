@@ -45,7 +45,6 @@ function EditRfidCard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Label map for display
   const labels = {
     rfid_serial_no: "RFID Card Serial Number",
     rfid_uid: "RFID UID",
@@ -63,10 +62,8 @@ function EditRfidCard() {
     remarks: "Remarks / Notes",
   };
 
-  // Fetch record on mount or prefill from navigation state (but only allowed fields)
   useEffect(() => {
     if (state && typeof state === "object" && Object.keys(state).length) {
-      // filter the incoming state to only allowed fields (prevents copying _id, __v, createdAt, allotment, etc.)
       const filtered = {};
       allowedFields.forEach((k) => {
         if (state[k] !== undefined) filtered[k] = state[k];
@@ -92,7 +89,6 @@ function EditRfidCard() {
         setError("Record not found.");
       } else {
         const d = res.data;
-        // Map only the allowed fields explicitly (ignore _id, createdAt, updatedAt, __v, allotment)
         setForm({
           rfid_serial_no: d.rfid_serial_no || "",
           rfid_uid: d.rfid_uid || "",
@@ -112,7 +108,11 @@ function EditRfidCard() {
       }
     } catch (err) {
       console.error("fetchRecord error:", err);
-      setError(err?.response ? `Server error: ${err.response.statusText}` : "Network error");
+      setError(
+        err?.response
+          ? `Server error: ${err.response.statusText}`
+          : "Network error"
+      );
     } finally {
       setLoading(false);
     }
@@ -128,18 +128,20 @@ function EditRfidCard() {
     try {
       setLoading(true);
 
-      // Prepare payload with proper number conversions (only allowed fields)
       const payload = {
         rfid_serial_no: (form.rfid_serial_no || "").trim(),
-        rfid_uid: (form.rfid_uid || "").trim(),
+        // 👇 UID excluded from editing (only included for payload reference)
+        rfid_uid: form.rfid_uid,
         user_name: (form.user_name || "").trim(),
         address: (form.address || "").trim(),
         village: (form.village || "").trim(),
         aadhar_no: (form.aadhar_no || "").toString().trim(),
         mobile_no: (form.mobile_no || "").toString().trim(),
         family_mems: Number(form.family_mems) || 0,
-        quant_water_alloted_per_day: Number(form.quant_water_alloted_per_day) || 0,
-        quant_water_alloted_per_month: Number(form.quant_water_alloted_per_month) || 0,
+        quant_water_alloted_per_day:
+          Number(form.quant_water_alloted_per_day) || 0,
+        quant_water_alloted_per_month:
+          Number(form.quant_water_alloted_per_month) || 0,
         swipe_count: Number(form.swipe_count) || 0,
         total_litres_consumed: Number(form.total_litres_consumed) || 0,
         remaining_card_balance: Number(form.remaining_card_balance) || 0,
@@ -157,7 +159,6 @@ function EditRfidCard() {
     }
   };
 
-  // === Styles ===
   const styles = {
     container: {
       padding: "20px",
@@ -184,17 +185,19 @@ function EditRfidCard() {
       width: "95%",
       textAlign: "center",
     },
+    disabledInput: {
+      padding: "10px",
+      border: "1px solid #ccc",
+      borderRadius: "6px",
+      fontSize: "14px",
+      width: "95%",
+      backgroundColor: "#f2f2f2",
+      color: "#555",
+      cursor: "not-allowed",
+      textAlign: "center",
+    },
     btnPrimary: {
       backgroundColor: "#0b74ff",
-      color: "#fff",
-      border: "none",
-      borderRadius: "6px",
-      padding: "10px 20px",
-      cursor: "pointer",
-      fontWeight: "600",
-    },
-    btnDanger: {
-      backgroundColor: "#dc3545",
       color: "#fff",
       border: "none",
       borderRadius: "6px",
@@ -244,7 +247,8 @@ function EditRfidCard() {
                 name={key}
                 value={form[key] ?? ""}
                 onChange={handleChange}
-                style={styles.input}
+                style={key === "rfid_uid" ? styles.disabledInput : styles.input}
+                disabled={key === "rfid_uid"} // 🔒 make RFID UID non-editable
               />
             </div>
           ))}
