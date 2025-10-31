@@ -857,13 +857,25 @@ export default function RfidCard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {!paginatedRecords || paginatedRecords.length === 0 ? (
-                      <tr>
-                        <td colSpan={columns.length} className="table-empty">
-                          {loading ? "Loading records..." : "No records found"}
-                        </td>
-                      </tr>
-                    ) : (
+{!paginatedRecords || paginatedRecords.length === 0 ? (
+  <tr>
+    <td
+      colSpan={columns.length}
+      className="table-empty"
+      style={{
+        textAlign: "center",
+        padding: "30px 0",
+        color: "#555",
+        fontWeight: 600,
+        fontSize: "14px",
+        background: "#fafafa",
+      }}
+    >
+      {loading ? "Loading records..." : "No records found"}
+    </td>
+  </tr>
+) : (
+
                       paginatedRecords.map((r, i) => (
                         <tr key={r._id || i}>
                           <td className="col-sno-td">{(currentPage - 1) * pageSize + i + 1}</td>
