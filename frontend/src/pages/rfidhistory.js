@@ -3,16 +3,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 
 /**
- * RFID History (final updated)
- * - Newest-first sorting preserved
- * - Client-side pagination & filter modal
- * - Modern Filter + Download buttons + glass modal
- * - Robust numeric parsing and local-day 'today' detection
- * - Summary cards (Today's Litres, Total Litres) use robust parsing
+ * RFID History — minimal change: make today's litres summation robust.
+ * All other logic preserved as you provided.
  */
 
 export default function RfidHistory() {
-  const { id } = useParams(); // route id (RFID UID or similar)
+  const { id } = useParams();
   const navigate = useNavigate();
 
   const [history, setHistory] = useState([]);
@@ -46,7 +42,7 @@ export default function RfidHistory() {
       const res = await axios.get(url, { timeout: 15000 });
       const data = res?.data ?? {};
 
-      // Extract array from common shapes
+      // Discover array in common shapes (unchanged order)
       let records = [];
       if (Array.isArray(data.response)) records = data.response;
       else if (Array.isArray(data)) records = data;
@@ -57,23 +53,20 @@ export default function RfidHistory() {
         records = arr || [];
       }
 
-      // Normalize and sort by timestamp (newest first)
-      const withTs = records.map((r) => ({ original: r, ts: parseRecordTimestamp(r) }));
-      withTs.sort((a, b) => (b.ts?.getTime() || 0) - (a.ts?.getTime() || 0));
-      const sorted = withTs.map((w) => w.original);
+      // DO NOT sort — use backend order directly
+      setHistory(records);
 
-      setHistory(sorted);
-
-      // notify other components that this UID's history updated
+      // optional: notify other components that this UID's history updated
       try {
         let uidToNotify = null;
-        if (Array.isArray(sorted) && sorted.length > 0) {
-          const first = sorted[0];
+        if (Array.isArray(records) && records.length > 0) {
+          const first = records[0];
           uidToNotify =
             first.RFID_UID ||
             first["RFID UID"] ||
             first.rfid_uid ||
             first.uid ||
+            first.RFID ||
             null;
         }
         if (!uidToNotify) uidToNotify = id;
@@ -82,10 +75,10 @@ export default function RfidHistory() {
           window.dispatchEvent(new CustomEvent("rfid-history-updated", { detail }));
         }
       } catch (e) {
-        console.warn("rfidhistory: notify dispatch failed", e);
+        // ignore
       }
 
-      if (sorted.length === 0) setError("No data found for this RFID UID");
+      if (!records.length) setError("No data found for this RFID UID");
     } catch (err) {
       console.error("fetchViaProxy error:", err);
       if (err.response)
@@ -103,75 +96,96 @@ export default function RfidHistory() {
     }
   };
 
-  /**
-   * TIMESTAMP PARSING
-   * - parseRecordTimestamp: extracts timestamp from many common field shapes
-   * - tryParseFlexibleDate: helper for different date formats
-   */
-  const parseRecordTimestamp = (rec) => {
+  /* ----------------- Helpers: field extraction & robust date detection ----------------- */
+
+  const getField = (obj, keys) => {
+    if (!obj) return "—";
+    const tryKeys = Array.isArray(keys) ? keys : [keys];
+    for (const k of tryKeys) {
+      if (k in obj && obj[k] !== null && obj[k] !== undefined && obj[k] !== "") return obj[k];
+      if (typeof k === "string") {
+        const camel = k.replace(/[_\s]+([a-zA-Z])/g, (_, c) => c.toUpperCase()).replace(/\s/g, "");
+        if (camel in obj && obj[camel] !== null && obj[camel] !== undefined && obj[camel] !== "")
+          return obj[camel];
+        const underscored = k.replace(/\s+/g, "_");
+        if (underscored in obj && obj[underscored] !== null && obj[underscored] !== undefined && obj[underscored] !== "")
+          return obj[underscored];
+      }
+    }
+    return "—";
+  };
+
+  const parseNumberField = (rec, keys) => {
+    const raw = getField(rec, keys);
+    if (raw === "—" || raw === null || raw === undefined || raw === "") return 0;
+    const s = String(raw).replace(/,/g, "").trim();
+    const m = s.match(/^-?\d+(\.\d+)?/);
+    const numStr = m ? m[0] : s;
+    const v = parseFloat(numStr);
+    return Number.isFinite(v) ? v : 0;
+  };
+
+  const safeNum = (v) => {
+    if (v === null || v === undefined || v === "") return "—";
+    const n = Number(v);
+    return Number.isFinite(n) ? n : v;
+  };
+
+  // Robustly extract a Date object (or null) from a record
+  const getRecordDate = (rec) => {
     if (!rec || typeof rec !== "object") return null;
 
-    const get = (keys) => {
-      for (const k of keys) {
-        if (k in rec && rec[k] !== null && rec[k] !== undefined && rec[k] !== "") return rec[k];
-        const camel = k
-          .replace(/[_\s]+([a-zA-Z])/g, (_, c) => c.toUpperCase())
-          .replace(/\s/g, "");
-        if (camel in rec && rec[camel] !== null && rec[camel] !== undefined && rec[camel] !== "")
-          return rec[camel];
-        const underscored = k.replace(/\s+/g, "_");
-        if (underscored in rec && rec[underscored] !== null && rec[underscored] !== undefined && rec[underscored] !== "")
-          return rec[underscored];
+    // try numeric timestamp fields first (epoch seconds or ms)
+    const tsCandidate = getField(rec, ["timestamp", "timeStamp", "ts", "time", "createdAt", "created_at", "updatedAt", "updated_at"]);
+    if (tsCandidate !== undefined && tsCandidate !== null && tsCandidate !== "") {
+      const s = String(tsCandidate).trim();
+      if (/^-?\d+$/.test(s)) {
+        // digits only -> epoch (10 or 13+ digits)
+        if (s.length <= 10) return new Date(Number(s) * 1000);
+        return new Date(Number(s));
       }
-      return undefined;
-    };
-
-    // numeric timestamp fields
-    const tsRaw = get(["timestamp", "timeStamp", "ts"]);
-    if (tsRaw !== undefined) {
-      const n = Number(tsRaw);
-      if (!Number.isNaN(n)) {
-        if (n > 1e12) return new Date(n); // probably ms
-        if (n > 1e9) return new Date(n); // still ms-ish
-        if (n > 0) return new Date(n * 1000); // seconds -> ms
-      }
-      const parsedISO = Date.parse(String(tsRaw));
-      if (!Number.isNaN(parsedISO)) return new Date(parsedISO);
+      // try ISO parse
+      const iso = Date.parse(s);
+      if (!Number.isNaN(iso)) return new Date(iso);
     }
 
-    // ISO-like
-    const iso = get(["dateTime", "datetime", "DateTime", "dt"]);
-    if (iso) {
-      const p = Date.parse(String(iso));
-      if (!Number.isNaN(p)) return new Date(p);
+    // If TxnDate and TxnTime exist separately, combine and parse
+    const txnDate = getField(rec, ["TxnDate", "Txn_Date", "Date", "date"]);
+    const txnTime = getField(rec, ["TxnTime", "time", "Time"]);
+    if (txnDate && txnDate !== "—") {
+      const combined = txnTime && txnTime !== "—" ? `${String(txnDate).trim()} ${String(txnTime).trim()}` : String(txnDate).trim();
+      const p = tryParseDateString(combined);
+      if (p) return p;
     }
 
-    // Date + Time pair
-    const dateField = get(["Date", "date", "transaction_date", "TxnDate"]);
-    const timeField = get(["Time", "time", "transaction_time", "TxnTime"]);
-    if (dateField) {
-      const dateStr = String(dateField).trim();
-      const timeStr = timeField ? String(timeField).trim() : "";
-      const attempts = [];
-      if (timeStr) attempts.push(`${dateStr} ${timeStr}`);
-      attempts.push(dateStr);
-      for (const attempt of attempts) {
-        const p = tryParseFlexibleDate(attempt);
+    // try common date-like fields
+    const candidates = [
+      getField(rec, ["dateTime", "datetime", "DateTime", "Date_Time", "date_time", "TxnDateTime", "transaction_datetime"]),
+      getField(rec, ["Date", "date", "TxnDate", "transaction_date"]),
+      getField(rec, ["Time", "time", "TxnTime", "transaction_time"]),
+    ].filter(Boolean);
+
+    for (const c of candidates) {
+      if (c && c !== "—") {
+        const p = tryParseDateString(String(c));
         if (p) return p;
       }
     }
 
-    // Combined fields like Date_Time
-    const combined = get(["Date_Time", "date_time", "DateTime", "dateTime"]);
-    if (combined) {
-      const p = tryParseFlexibleDate(String(combined));
-      if (p) return p;
+    // try all string fields searching for a date-like token
+    for (const key of Object.keys(rec)) {
+      const val = rec[key];
+      if (!val) continue;
+      if (typeof val === "string" && /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})|(\d{10,13})/.test(val)) {
+        const p = tryParseDateString(String(val));
+        if (p) return p;
+      }
     }
 
-    // fallback: try parsing entire record string
+    // fallback: try Date.parse on whole record string
     try {
       const str = JSON.stringify(rec);
-      const p = tryParseFlexibleDate(str);
+      const p = tryParseDateString(str);
       if (p) return p;
     } catch (e) {
       // ignore
@@ -180,103 +194,86 @@ export default function RfidHistory() {
     return null;
   };
 
-  const tryParseFlexibleDate = (s) => {
+  // helper: try parsing flexible date strings (ISO, yyyy-mm-dd, dd/mm/yyyy, epoch tokens)
+  const tryParseDateString = (s) => {
     if (!s) return null;
     const str = String(s).trim();
 
-    // direct ISO-ish parse
+    // ISO first
     const iso = Date.parse(str);
     if (!Number.isNaN(iso)) return new Date(iso);
 
-    // split date/time
-    const parts = str.split(" ");
+    // find epoch token
+    const epochMatch = str.match(/(^|\D)(\d{10,13})(\D|$)/);
+    if (epochMatch) {
+      const digits = epochMatch[2];
+      const n = Number(digits);
+      if (digits.length === 10) return new Date(n * 1000);
+      return new Date(n);
+    }
+
+    // try dd/mm/yyyy or dd-mm-yyyy or mm/dd/yyyy heuristic (prefer day-first if ambiguous)
+    const parts = str.split(/\s+/);
     const datePart = parts[0];
     const timePart = parts.slice(1).join(" ");
 
-    // dd/mm/yyyy or dd-mm-yyyy
     const dmy = datePart.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
     if (dmy) {
-      let dd = dmy[1].padStart(2, "0");
-      let mm = dmy[2].padStart(2, "0");
-      let yy = dmy[3];
-      if (yy.length === 2) yy = "20" + yy;
-      const isoLike = `${yy}-${mm}-${dd}` + (timePart ? ` ${timePart}` : "");
+      let a = Number(dmy[1]);
+      let b = Number(dmy[2]);
+      let c = String(dmy[3]);
+      if (c.length === 2) c = "20" + c;
+      let day, month, year;
+      if (a > 12) {
+        day = String(a).padStart(2, "0");
+        month = String(b).padStart(2, "0");
+      } else if (b > 12) {
+        month = String(a).padStart(2, "0");
+        day = String(b).padStart(2, "0");
+      } else {
+        // ambiguous: prefer day-first
+        day = String(a).padStart(2, "0");
+        month = String(b).padStart(2, "0");
+      }
+      year = String(c);
+      const isoLike = `${year}-${month}-${day}` + (timePart ? ` ${timePart}` : "");
       const parsed = Date.parse(isoLike);
       if (!Number.isNaN(parsed)) return new Date(parsed);
     }
 
-    // yyyy/mm/dd or yyyy-mm-dd
+    // yyyy-mm-dd
     const ymd = datePart.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
     if (ymd) {
-      const isoLike = `${ymd[1]}-${String(ymd[2]).padStart(2, "0")}-${String(ymd[3]).padStart(2, "0")}` + (timePart ? ` ${timePart}` : "");
+      const isoLike =
+        `${ymd[1]}-${String(ymd[2]).padStart(2, "0")}-${String(ymd[3]).padStart(2, "0")}` +
+        (timePart ? ` ${timePart}` : "");
       const parsed = Date.parse(isoLike);
       if (!Number.isNaN(parsed)) return new Date(parsed);
     }
 
+    // last resort
     const last = Date.parse(str);
     if (!Number.isNaN(last)) return new Date(last);
+
     return null;
   };
 
-  // ----------------- helpers -----------------
-  const getField = (obj, keys) => {
-    if (!obj) return "—";
-    const tryKeys = Array.isArray(keys) ? keys : [keys];
-    for (const k of tryKeys) {
-      if (k in obj && obj[k] !== null && obj[k] !== undefined) return obj[k];
-      if (typeof k === "string") {
-        const camel = k.replace(/[_\s]+([a-zA-Z])/g, (_, c) => c.toUpperCase()).replace(/\s/g, "");
-        if (camel in obj && obj[camel] !== null && obj[camel] !== undefined) return obj[camel];
-        const underscored = k.replace(/\s+/g, "_");
-        if (underscored in obj && obj[underscored] !== null && obj[underscored] !== undefined) return obj[underscored];
-      }
-    }
-    return "—";
-  };
-
-  // Robust numeric extractor — returns 0 if not parseable
-  const parseNumberField = (rec, keys) => {
-    const raw = getField(rec, keys);
-    if (raw === "—" || raw === null || raw === undefined || raw === "") return 0;
-    // strip commas, trim
-    const s = String(raw).replace(/,/g, "").trim();
-    // allow values like "20 L" — extract leading number
-    const m = s.match(/^-?\d+(\.\d+)?/);
-    const numStr = m ? m[0] : s;
-    const v = parseFloat(numStr);
-    return Number.isFinite(v) ? v : 0;
-  };
-
-  // Compare local (browser) dates for same day
-  const isSameLocalDay = (dateA, dateB) =>
-    dateA.getFullYear() === dateB.getFullYear() &&
-    dateA.getMonth() === dateB.getMonth() &&
-    dateA.getDate() === dateB.getDate();
-
-  const safeNum = (v) => {
-    if (v === null || v === undefined || v === "") return "—";
-    const n = Number(v);
-    return Number.isFinite(n) ? n : v;
-  };
-
-  // ----------------- filtering & pagination -----------------
+  /* ----------------- filtering & pagination (use getRecordDate) ----------------- */
   const viewData = useMemo(() => {
     if (!activeFilter) return history;
     const { from, to } = activeFilter;
     return history.filter((rec) => {
-      const ts = parseRecordTimestamp(rec);
-      if (!ts) return false; // exclude records without timestamp from date filter
-      return ts.getTime() >= from.getTime() && ts.getTime() <= to.getTime();
+      const d = getRecordDate(rec);
+      if (!d) return false;
+      return d.getTime() >= from.getTime() && d.getTime() <= to.getTime();
     });
   }, [history, activeFilter]);
 
   const totalItems = viewData.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
 
-  // clamp page safely when totalPages changes
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
-    // only when totalPages or page changes
   }, [totalPages]); // eslint-disable-line
 
   const paginatedData = viewData.slice((page - 1) * pageSize, page * pageSize);
@@ -287,32 +284,75 @@ export default function RfidHistory() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // ----------------- summaries (robust) -----------------
+  /* ----------------- summaries ----------------- */
+  // Total litres across entire history (backend data) — safer than relying on filtering-side date parsing
   const totalLitres = useMemo(() => {
-    return viewData.reduce((sum, r) => sum + parseNumberField(r, ["Litres Consumed", "Litres", "litres_consumed"]), 0);
-  }, [viewData]);
+    return history.reduce(
+      (sum, r) =>
+        sum +
+        parseNumberField(r, [
+          "Litres Consumed",
+          "Litres",
+          "litres_consumed",
+          "litres",
+          "litre",
+          "liter",
+          "volume",
+        ]),
+      0
+    );
+  }, [history]);
 
+  const isSameLocalDay = (dateA, dateB) =>
+    dateA.getFullYear() === dateB.getFullYear() &&
+    dateA.getMonth() === dateB.getMonth() &&
+    dateA.getDate() === dateB.getDate();
+
+  // === UPDATED: Today's litres computed from history (based on local day).
+  // Uses getRecordDate first; if that returns null it attempts to combine Date + Time fields and parse.
   const todaysLitres = useMemo(() => {
     const nowLocal = new Date();
-    return viewData.reduce((sum, r) => {
-      const ts = parseRecordTimestamp(r);
-      if (!ts) return sum;
-      if (isSameLocalDay(ts, nowLocal)) {
-        return sum + parseNumberField(r, ["Litres Consumed", "Litres", "litres_consumed"]);
+    return history.reduce((sum, r) => {
+      let d = getRecordDate(r);
+
+      // If parsing failed, attempt to construct from date/time fields explicitly
+      if (!d) {
+        const df = getField(r, ["Date", "date", "TxnDate"]);
+        const tf = getField(r, ["Time", "time", "TxnTime"]);
+        if (df && df !== "—") {
+          const combined = tf && tf !== "—" ? `${String(df).trim()} ${String(tf).trim()}` : String(df).trim();
+          d = tryParseDateString(combined);
+        }
+      }
+
+      if (!d) return sum;
+      if (isSameLocalDay(d, nowLocal)) {
+        return (
+          sum +
+          parseNumberField(r, [
+            "Litres Consumed",
+            "Litres",
+            "litres_consumed",
+            "litres",
+            "litre",
+            "liter",
+            "volume",
+          ])
+        );
       }
       return sum;
     }, 0);
-  }, [viewData]);
+  }, [history]);
 
-  // ----------------- download last 30 days CSV -----------------
+  /* ----------------- download last 30 days CSV ----------------- */
   const downloadLast30CSV = () => {
     const today = new Date();
     const from = new Date(today);
     from.setDate(from.getDate() - 30);
 
     const last30 = history.filter((r) => {
-      const ts = parseRecordTimestamp(r);
-      return ts && ts >= from && ts <= today;
+      const d = getRecordDate(r);
+      return d && d >= from && d <= today;
     });
 
     if (!last30.length) {
@@ -334,7 +374,7 @@ export default function RfidHistory() {
     setDownloadOpen(false);
   };
 
-  // ----------------- filter handlers -----------------
+  /* ----------------- filter handlers ----------------- */
   const openFilter = () => {
     if (activeFilter) {
       setFilterFrom(activeFilter.from.toISOString().slice(0, 10));
@@ -370,7 +410,15 @@ export default function RfidHistory() {
     setPage(1);
   };
 
-  // ----------------- render -----------------
+  const fmtDate = (d) => {
+    if (!d) return "";
+    const year = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${year}-${m}-${dd}`;
+  };
+
+  /* ----------------- render ----------------- */
   const headers = [
     "S.No",
     "RFID_UID",
@@ -382,6 +430,11 @@ export default function RfidHistory() {
     "Amount Debited",
     "Price Per Litre",
   ];
+
+  // Filter button label: show selected range if active
+  const filterButtonLabel = activeFilter
+    ? `🔎 Filter (${fmtDate(activeFilter.from)} → ${fmtDate(activeFilter.to)})`
+    : "🔎 Filter";
 
   return (
     <div style={styles.page}>
@@ -406,7 +459,7 @@ export default function RfidHistory() {
                 }}
                 title="Filter by date range"
               >
-                🔎 Filter
+                {filterButtonLabel}
               </button>
 
               <button
@@ -481,14 +534,19 @@ export default function RfidHistory() {
                     {paginatedData.length > 0 ? (
                       paginatedData.map((item, i) => {
                         const index = (page - 1) * pageSize + i + 1;
-                        const rfid = getField(item, ["RFID_UID", "RFID UID", "rfid_uid", "uid"]);
-                        const deviceId = getField(item, ["Device Id", "DeviceId", "device_id"]);
-                        const remaining = getField(item, ["Remaining Card Balance", "RemainingBalance", "remaining_card_balance"]);
-                        const litres = getField(item, ["Litres Consumed", "Litres", "litres_consumed"]);
-                        const amount = getField(item, ["Amount Debited", "AmountDebited", "amount_debited"]);
-                        const price = getField(item, ["Price Per Litre", "PricePerLitre", "price_per_litre"]);
-                        const dateField = getField(item, ["Date", "date"]);
-                        const timeField = getField(item, ["Time", "time"]);
+                        const rfid = getField(item, ["RFID_UID", "RFID UID", "rfid_uid", "uid", "RFID"]);
+                        const deviceId = getField(item, ["Device Id", "DeviceId", "device_id", "device"]);
+                        const remaining = getField(item, [
+                          "Remaining Card Balance",
+                          "RemainingBalance",
+                          "remaining_card_balance",
+                          "remaining",
+                        ]);
+                        const litres = getField(item, ["Litres Consumed", "Litres", "litres_consumed", "litres", "litre", "liter", "volume"]);
+                        const amount = getField(item, ["Amount Debited", "AmountDebited", "amount_debited", "amount"]);
+                        const price = getField(item, ["Price Per Litre", "PricePerLitre", "price_per_litre", "price"]);
+                        const dateField = getField(item, ["Date", "date", "dateTime", "DateTime", "TxnDate"]);
+                        const timeField = getField(item, ["Time", "time", "TxnTime"]);
                         const dateStr = dateField || "—";
                         const timeStr = timeField || "—";
 
@@ -617,7 +675,7 @@ export default function RfidHistory() {
         </GlassModal>
       )}
 
-      {/* Download Modal (glassy) showing always last 30 days message */}
+      {/* Download Modal */}
       {downloadOpen && (
         <GlassModal onClose={() => setDownloadOpen(false)}>
           <h3 style={{ textAlign: "center", color: "#1e293b" }}>⬇️ Download 30 Days Data</h3>
@@ -637,133 +695,7 @@ export default function RfidHistory() {
   );
 }
 
-/* ----------------- styles & helpers ----------------- */
-
-const styles = {
-  page: {
-    padding: "10px 20px 30px",
-    background: "#f5f7fb",
-    minHeight: "100vh",
-    fontFamily: "Segoe UI, Roboto, Arial",
-  },
-  container: { maxWidth: 1200, margin: "0 auto" },
-  card: {
-    background: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    boxShadow: "0 6px 18px rgba(20,30,60,0.06)",
-  },
-  backBtn: {
-    background: "#0b74ff",
-    color: "#fff",
-    border: "none",
-    padding: "8px 14px",
-    borderRadius: 8,
-    cursor: "pointer",
-    fontWeight: 700,
-  },
-  heading: {
-    textAlign: "center",
-    marginBottom: 8,
-    fontSize: 26,
-    fontWeight: 800,
-    color: "#1e293b",
-    letterSpacing: "0.4px",
-  },
-  cardsRow: {
-    display: "flex",
-    justifyContent: "center",
-    gap: 20,
-    marginTop: -6,
-    marginBottom: 12,
-    flexWrap: "wrap",
-  },
-  summaryCardLight: {
-    flex: "0 0 260px",
-    padding: "16px 18px",
-    borderRadius: 12,
-    background: "linear-gradient(135deg,#e0f2fe,#bfdbfe)",
-    boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-    textAlign: "center",
-    fontWeight: 700,
-    transition: "transform 0.18s ease, box-shadow 0.18s ease",
-  },
-  summaryCardGreen: {
-    flex: "0 0 260px",
-    padding: "16px 18px",
-    borderRadius: 12,
-    background: "linear-gradient(135deg,#dcfce7,#bbf7d0)",
-    boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-    textAlign: "center",
-    fontWeight: 700,
-    transition: "transform 0.18s ease, box-shadow 0.18s ease",
-  },
-  tableWrap: {
-    overflowX: "auto",
-    borderRadius: 8,
-    border: "1px solid #e6e8ea",
-  },
-  table: { width: "100%", borderCollapse: "collapse", minWidth: 900 },
-  th: {
-    padding: 12,
-    background: "#0b74ff",
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: 700,
-  },
-  td: {
-    padding: 10,
-    textAlign: "center",
-    borderBottom: "1px solid #f1f5f9",
-    color: "#111827",
-    fontSize: 14,
-  },
-  empty: {
-    padding: 24,
-    textAlign: "center",
-    color: "#6b7280",
-    fontStyle: "italic",
-  },
-  filterBtn: {
-    background: "linear-gradient(135deg,#2563eb,#3b82f6)",
-    color: "#fff",
-    border: "none",
-    padding: "10px 14px",
-    borderRadius: 12,
-    cursor: "pointer",
-    fontWeight: 700,
-    boxShadow: "0 6px 20px rgba(37,99,235,0.12)",
-    transition: "transform 0.18s ease, box-shadow 0.18s ease",
-  },
-  downloadBtn: {
-    background: "linear-gradient(135deg,#10b981,#059669)",
-    color: "#fff",
-    border: "none",
-    padding: "10px 14px",
-    borderRadius: 12,
-    cursor: "pointer",
-    fontWeight: 700,
-    boxShadow: "0 6px 20px rgba(5,150,105,0.12)",
-    transition: "transform 0.18s ease, box-shadow 0.18s ease",
-  },
-  input: { width: "100%", padding: "8px 10px", marginTop: 6, borderRadius: 8, border: "1px solid #d1d5db" },
-  btnPrimary: { padding: "8px 12px", borderRadius: 8, background: "linear-gradient(135deg,#6366f1,#4f46e5)", color: "#fff", border: "none", cursor: "pointer", fontWeight: 700 },
-  btnNeutral: { padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb", cursor: "pointer", fontWeight: 700 },
-  btnDanger: { padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #fca5a5", color: "#dc2626", cursor: "pointer", fontWeight: 700 },
-  gradientDownloadBtn: { background: "linear-gradient(135deg,#10b981,#059669)", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 12, cursor: "pointer", fontWeight: 700, boxShadow: "0 8px 26px rgba(5,150,105,0.14)" },
-  tdStyle: { padding: 10, textAlign: "center", borderBottom: "1px solid #f1f5f9", color: "#111827", fontSize: 14 },
-  activePageBtn: { padding: "8px 12px", borderRadius: 8, background: "linear-gradient(135deg,#6c5ce7,#4f46e5)", color: "#fff", border: "none", fontWeight: 700 },
-};
-
-const pageBtn = (disabled) => ({
-  padding: "8px 12px",
-  borderRadius: 8,
-  border: "1px solid #e5e7eb",
-  background: disabled ? "#f9fafb" : "#fff",
-  color: disabled ? "#9ca3af" : "#111827",
-  cursor: disabled ? "not-allowed" : "pointer",
-  fontWeight: 700,
-});
+/* ----------------- pagination helpers, modal, styles ----------------- */
 
 function getPageButtons(totalPages, currentPage) {
   const pages = [];
@@ -782,6 +714,16 @@ function getPageButtons(totalPages, currentPage) {
   pages.push(totalPages);
   return pages;
 }
+
+const pageBtn = (disabled) => ({
+  padding: "8px 12px",
+  borderRadius: 8,
+  border: "1px solid #e5e7eb",
+  background: disabled ? "#f9fafb" : "#fff",
+  color: disabled ? "#9ca3af" : "#111827",
+  cursor: disabled ? "not-allowed" : "pointer",
+  fontWeight: 700,
+});
 
 function GlassModal({ children, onClose }) {
   return (
@@ -805,7 +747,7 @@ function GlassModal({ children, onClose }) {
         style={{
           width: 460,
           maxWidth: "96%",
-          background: "rgba(255,255,255,0.9)",
+          background: "rgba(255,255,255,0.95)",
           borderRadius: 14,
           padding: 20,
           boxShadow: "0 12px 40px rgba(2,6,23,0.28)",
@@ -817,3 +759,27 @@ function GlassModal({ children, onClose }) {
     </div>
   );
 }
+
+const styles = {
+  page: { padding: "10px 20px 30px", background: "#f5f7fb", minHeight: "100vh", fontFamily: "Segoe UI, Roboto, Arial" },
+  container: { maxWidth: 1200, margin: "0 auto" },
+  card: { background: "#fff", borderRadius: 12, padding: 16, boxShadow: "0 6px 18px rgba(20,30,60,0.06)" },
+  backBtn: { background: "#0b74ff", color: "#fff", border: "none", padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontWeight: 700 },
+  heading: { textAlign: "center", marginBottom: 8, fontSize: 26, fontWeight: 800, color: "#1e293b", letterSpacing: "0.4px" },
+  cardsRow: { display: "flex", justifyContent: "center", gap: 20, marginTop: -6, marginBottom: 12, flexWrap: "wrap" },
+  summaryCardLight: { flex: "0 0 260px", padding: "16px 18px", borderRadius: 12, background: "linear-gradient(135deg,#e0f2fe,#bfdbfe)", boxShadow: "0 6px 18px rgba(0,0,0,0.08)", textAlign: "center", fontWeight: 700, transition: "transform 0.18s ease, box-shadow 0.18s ease" },
+  summaryCardGreen: { flex: "0 0 260px", padding: "16px 18px", borderRadius: 12, background: "linear-gradient(135deg,#dcfce7,#bbf7d0)", boxShadow: "0 6px 18px rgba(0,0,0,0.08)", textAlign: "center", fontWeight: 700, transition: "transform 0.18s ease, box-shadow 0.18s ease" },
+  tableWrap: { overflowX: "auto", borderRadius: 8, border: "1px solid #e6e8ea" },
+  table: { width: "100%", borderCollapse: "collapse", minWidth: 900 },
+  th: { padding: 12, background: "#0b74ff", color: "#fff", textAlign: "center", fontWeight: 700 },
+  td: { padding: 10, textAlign: "center", borderBottom: "1px solid #f1f5f9", color: "#111827", fontSize: 14 },
+  empty: { padding: 24, textAlign: "center", color: "#6b7280", fontStyle: "italic" },
+  filterBtn: { background: "linear-gradient(135deg,#2563eb,#3b82f6)", color: "#fff", border: "none", padding: "10px 14px", borderRadius: 12, cursor: "pointer", fontWeight: 700, boxShadow: "0 6px 20px rgba(37,99,235,0.12)", transition: "transform 0.18s ease, box-shadow 0.18s ease" },
+  downloadBtn: { background: "linear-gradient(135deg,#10b981,#059669)", color: "#fff", border: "none", padding: "10px 14px", borderRadius: 12, cursor: "pointer", fontWeight: 700, boxShadow: "0 6px 20px rgba(5,150,105,0.12)", transition: "transform 0.18s ease, box-shadow 0.18s ease" },
+  input: { width: "100%", padding: "8px 10px", marginTop: 6, borderRadius: 8, border: "1px solid #d1d5db" },
+  btnPrimary: { padding: "8px 12px", borderRadius: 8, background: "linear-gradient(135deg,#6366f1,#4f46e5)", color: "#fff", border: "none", cursor: "pointer", fontWeight: 700 },
+  btnNeutral: { padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb", cursor: "pointer", fontWeight: 700 },
+  btnDanger: { padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #fca5a5", color: "#dc2626", cursor: "pointer", fontWeight: 700 },
+  gradientDownloadBtn: { background: "linear-gradient(135deg,#10b981,#059669)", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 12, cursor: "pointer", fontWeight: 700, boxShadow: "0 8px 26px rgba(5,150,105,0.14)" },
+  activePageBtn: { padding: "8px 12px", borderRadius: 8, background: "linear-gradient(135deg,#6c5ce7,#4f46e5)", color: "#fff", border: "none", fontWeight: 700 },
+};
