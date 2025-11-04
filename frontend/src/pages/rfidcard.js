@@ -1,5 +1,5 @@
 // src/pages/rfidcard.js
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "../styles/pages.css";
@@ -43,12 +43,45 @@ export default function RfidCard() {
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filterFrom, setFilterFrom] = useState(""); // yyyy-mm-dd
   const [filterTo, setFilterTo] = useState("");   // yyyy-mm-dd
-  const [activeDateFilter, setActiveDateFilter] = useState(null); // { fromTs, toTs } or null
+  const [activeDateFilter, setActiveDateFilter] = useState(null); // { fromTs, toTs, fromLabel, toLabel } or null
 
-  // Active Cards popup state
+  // Active Cards popup state (client-derived only)
   const [showActivePopup, setShowActivePopup] = useState(false);
-  const [activeCards, setActiveCards] = useState([]); // array of { rfid_uid }
+  const [activeCards, setActiveCards] = useState([]); // normalized unique list [{ rfid_uid }]
 
+  // ------------------ Helpers for date formatting/parsing ------------------
+  const pad2 = (n) => (n < 10 ? "0" + n : String(n));
+
+  /** format timestamp (ms) -> "DD-MM-YYYY" using UTC getters */
+  const formatDateDDMMYYYY_UTC = useCallback((ms) => {
+    if (ms === null || ms === undefined) return "";
+    const d = new Date(Number(ms));
+    if (isNaN(d.getTime())) return "";
+    const dd = pad2(d.getUTCDate());
+    const mm = pad2(d.getUTCMonth() + 1);
+    const yyyy = d.getUTCFullYear();
+    return `${dd}-${mm}-${yyyy}`;
+  }, []);
+
+  /** parse "YYYY-MM-DD" -> UTC start / end ms */
+  const parseYMDtoUTCStart = useCallback((ymd) => {
+    if (!ymd) return null;
+    const parts = String(ymd).split("-");
+    if (parts.length !== 3) return null;
+    const y = Number(parts[0]), m = Number(parts[1]), d = Number(parts[2]);
+    if (!y || !m || !d) return null;
+    return Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+  }, []);
+  const parseYMDtoUTCEnd = useCallback((ymd) => {
+    if (!ymd) return null;
+    const parts = String(ymd).split("-");
+    if (parts.length !== 3) return null;
+    const y = Number(parts[0]), m = Number(parts[1]), d = Number(parts[2]);
+    if (!y || !m || !d) return null;
+    return Date.UTC(y, m - 1, d, 23, 59, 59, 999);
+  }, []);
+
+  // ------------------ time extraction & sorting ------------------
   const getRecordTime = useCallback((r) => {
     if (!r) return 0;
     const tryDate = (v) => {
@@ -72,7 +105,6 @@ export default function RfidCard() {
   // central function to compute filteredRecords based on search + date filter
   const computeFiltered = useCallback((sourceRecords, searchQ, dateFilter) => {
     let arr = Array.isArray(sourceRecords) ? sourceRecords.slice() : [];
-    // apply search if present
     const q = String(searchQ || "").trim().toLowerCase();
     if (q) {
       arr = arr.filter((r) => {
@@ -90,7 +122,6 @@ export default function RfidCard() {
       });
     }
 
-    // apply date filter if present
     if (dateFilter && typeof dateFilter.fromTs === "number" && typeof dateFilter.toTs === "number") {
       arr = arr.filter((r) => {
         const t = getRecordTime(r);
@@ -101,6 +132,15 @@ export default function RfidCard() {
     return sortByLastSeen(arr);
   }, [getRecordTime, sortByLastSeen]);
 
+  // ------------------ UID normalization utility ------------------
+  const normalizeUid = useCallback((raw) => {
+    if (!raw && raw !== 0) return "";
+    try {
+      return String(raw).trim().toUpperCase();
+    } catch (e) { return String(raw || "").trim().toUpperCase(); }
+  }, []);
+
+  // ------------------ upsert / remove / fetch ------------------
   const upsertRecord = useCallback((incoming) => {
     if (!incoming) return;
     setRecords((prev = []) => {
@@ -114,28 +154,23 @@ export default function RfidCard() {
       });
       if (idx !== -1) copy.splice(idx, 1);
       copy.unshift(incoming);
-      return sortByLastSeen(copy);
+      const newRecords = sortByLastSeen(copy);
+      try {
+        setFilteredRecords(computeFiltered(newRecords, searchQuery, activeDateFilter));
+      } catch (e) {
+        console.warn("recompute filtered after upsert failed", e);
+      }
+      setCurrentPage(1);
+      return newRecords;
     });
-
-    // recompute filteredRecords from updated records + current search & date filter
-    setFilteredRecords((prev = []) => {
-      const newRecords = (() => {
-        const p = Array.isArray(records) ? [...records] : [];
-        // merge incoming into records copy
-        const idx = p.findIndex((r) => r && ((incoming._id && r._id && String(r._id) === String(incoming._id)) || (incoming.rfid_uid && r.rfid_uid && String(r.rfid_uid) === String(incoming.rfid_uid))));
-        if (idx !== -1) p.splice(idx, 1);
-        p.unshift(incoming);
-        return p;
-      })();
-      return computeFiltered(newRecords, searchQuery, activeDateFilter);
-    });
-
-    setCurrentPage(1);
-  }, [sortByLastSeen, computeFiltered, records, searchQuery, activeDateFilter]);
+  }, [sortByLastSeen, computeFiltered, searchQuery, activeDateFilter]);
 
   const removeRecordById = useCallback((id) => {
     if (!id) return;
-    setRecords((prev = []) => (prev || []).filter((r) => String(r._id) !== String(id)));
+    setRecords((prev = []) => {
+      const next = (prev || []).filter((r) => String(r._id) !== String(id));
+      return next;
+    });
     setFilteredRecords((prev = []) => (prev || []).filter((r) => String(r._id) !== String(id)));
   }, []);
 
@@ -157,7 +192,6 @@ export default function RfidCard() {
         const sorted = sortByLastSeen(data);
         if (isMountedRef.current) {
           setRecords(sorted);
-          // compute filteredRecords using current search & date filters
           setFilteredRecords(computeFiltered(sorted, searchQuery, activeDateFilter));
           setCurrentPage(1);
         }
@@ -177,7 +211,7 @@ export default function RfidCard() {
     };
   }, [sortByLastSeen, computeFiltered, searchQuery, activeDateFilter]);
 
-  // update filteredRecords when searchQuery, records, or activeDateFilter change
+  // update filteredRecords when searchQuery, records, or activeDateFilter change (debounced)
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchDebounceRef.current = setTimeout(() => {
@@ -189,6 +223,7 @@ export default function RfidCard() {
     };
   }, [searchQuery, records, computeFiltered, activeDateFilter]);
 
+  // socket realtime updates
   useEffect(() => {
     let socket = null;
     try {
@@ -226,13 +261,13 @@ export default function RfidCard() {
             const item = { ...copy[idx], lastSeen: payload.lastSeen || payload.last_seen || new Date().toISOString(), last_seen: payload.lastSeen || payload.last_seen || new Date().toISOString() };
             copy.splice(idx, 1);
             copy.unshift(item);
-            // also recompute filteredRecords based on updated records
-            setFilteredRecords(computeFiltered(copy, searchQuery, activeDateFilter));
-            return sortByLastSeen(copy);
+            const newSorted = sortByLastSeen(copy);
+            setFilteredRecords(computeFiltered(newSorted, searchQuery, activeDateFilter));
+            setCurrentPage(1);
+            return newSorted;
           }
           return prev;
         });
-        setCurrentPage(1);
       }
     };
 
@@ -253,8 +288,15 @@ export default function RfidCard() {
     };
   }, [upsertRecord, removeRecordById, sortByLastSeen, computeFiltered, searchQuery, activeDateFilter]);
 
+  // CSV download (respects current search + date filter; exports full filtered set, not just page)
   const handleDownload = () => {
-    if (!filteredRecords || filteredRecords.length === 0) { alert('No records to download!'); return; }
+    const exportRecords = computeFiltered(records, searchQuery, activeDateFilter);
+
+    if (!exportRecords || exportRecords.length === 0) {
+      alert('No records to download!');
+      return;
+    }
+
     const csvHeaders = [
       "S.No",
       "RFID Serial No",
@@ -274,7 +316,7 @@ export default function RfidCard() {
     ];
     const csvRows = [csvHeaders.join(",")];
 
-    filteredRecords.forEach((r, i) => {
+    exportRecords.forEach((r, i) => {
       const row = [
         i + 1,
         r.rfid_serial_no || "",
@@ -320,7 +362,6 @@ export default function RfidCard() {
     }
   };
 
-  // keep RFID non-clickable as requested for history view replaced by click behavior
   const onSearchInput = (e) => { setSearchQuery(e.target.value); };
 
   const atRightEdge = (w) => w.scrollLeft + w.clientWidth >= w.scrollWidth - 8;
@@ -402,47 +443,55 @@ export default function RfidCard() {
     "Action",
   ];
 
-  // Apply date filter from modal inputs. Uses inclusive date range.
+  // ------------------ Apply / Clear date filter (client-only active cards)
   const applyDateFilterFromInputs = async () => {
     if (!filterFrom && !filterTo) {
       setActiveDateFilter(null);
       setShowFilterModal(false);
+      setActiveCards([]);
       return;
     }
 
-    // compute timestamps
-    const fromTs = filterFrom ? new Date(filterFrom + "T00:00:00").getTime() : -8640000000000000; // very small
-    // include full 'to' day until 23:59:59.999
-    const toTs = filterTo ? new Date(filterTo + "T23:59:59.999").getTime() : 8640000000000000; // very large
+    const fromTs = filterFrom ? parseYMDtoUTCStart(filterFrom) : -8640000000000000;
+    const toTs = filterTo ? parseYMDtoUTCEnd(filterTo) : 8640000000000000;
 
-    // set active filter locally
-    setActiveDateFilter({ fromTs, toTs });
-    setFilteredRecords(computeFiltered(records, searchQuery, { fromTs, toTs }));
-    setCurrentPage(1);
+    const fromLabel = formatDateDDMMYYYY_UTC(fromTs);
+    const toLabel = formatDateDDMMYYYY_UTC(toTs);
+    setActiveDateFilter({ fromTs, toTs, fromLabel, toLabel });
 
-    // Fetch active cards from backend aggregation endpoint (controller should implement /api/rfid/active)
+    // recompute filteredRecords from authoritative records
     try {
-      setLoading(true);
-      const res = await axios.get('/api/rfid/active', { params: { from: filterFrom, to: filterTo }, timeout: 20000 });
-      const data = Array.isArray(res.data) ? res.data : (res.data.data || res.data.items || res.data.active || []);
-      // Expecting array of objects like [{ rfid_uid: 'ABC123' }, ...]
-      setActiveCards(data || []);
-      setShowActivePopup(true);
-    } catch (err) {
-      console.warn('active fetch failed', err && err.message ? err.message : err);
-      // fallback: derive active cards from client-side records using date filter (unique uids)
-      const uids = {};
-      (records || []).forEach((r) => {
-        const t = getRecordTime(r);
-        if (t >= fromTs && t <= toTs) uids[String(r.rfid_uid || '')] = true;
-      });
-      const arr = Object.keys(uids).filter(Boolean).map((u) => ({ rfid_uid: u }));
-      setActiveCards(arr);
-      setShowActivePopup(true);
-    } finally {
-      setLoading(false);
-      setShowFilterModal(false);
+      const newFiltered = computeFiltered(records, searchQuery, { fromTs, toTs });
+      setFilteredRecords(newFiltered);
+      setCurrentPage(1);
+      console.debug("[DateFilter] fromTs:", fromTs, "toTs:", toTs, "clientFiltered:", newFiltered.length);
+    } catch (e) {
+      console.warn("filter compute failed", e);
     }
+
+    // derive active cards client-side from filteredRecords (unique canonical UIDs)
+    const clientFiltered = computeFiltered(records, searchQuery, { fromTs, toTs }) || [];
+    const seen = new Set();
+    const arr = [];
+    clientFiltered.forEach((r) => {
+      const canon = normalizeUid(r.rfid_uid || r.rfidUid || r.uid || "");
+      if (!canon) return;
+      if (!seen.has(canon)) {
+        seen.add(canon);
+        // keep some detail - we'll show UID and the first matching record's info in popup
+        arr.push({
+          rfid_uid: canon,
+          user_name: r.user_name || "",
+          mobile_no: r.mobile_no || "",
+          address: r.address || "",
+          village: r.village || "",
+        });
+      }
+    });
+
+    setActiveCards(arr);
+    setShowActivePopup(true);
+    setShowFilterModal(false);
   };
 
   const clearDateFilter = () => {
@@ -452,8 +501,10 @@ export default function RfidCard() {
     setFilteredRecords(computeFiltered(records, searchQuery, null));
     setCurrentPage(1);
     setShowFilterModal(false);
+    setActiveCards([]);
   };
 
+  // ------------------ CSS (kept inline like before) ------------------
   const css = `
     .hint-overlay { position: relative; }
     .rfid-hint {
@@ -479,7 +530,6 @@ export default function RfidCard() {
     .arrow-right { animation: arrowPulseRight 1.2s infinite; }
     .table-empty { text-align: center; padding: 18px 0; color: #666; }
 
-    /* wrapper (outer white card unchanged) */
     .table-wrapper {
       -webkit-overflow-scrolling: touch;
       overflow-x: auto;
@@ -489,7 +539,6 @@ export default function RfidCard() {
       padding: 0;
     }
 
-    /* small left-shift inside wrapper so Action column is visible */
     .data-table {
       border-collapse: collapse;
       width: calc(100% + 8px);
@@ -498,7 +547,6 @@ export default function RfidCard() {
       transform: translateX(-7px);
     }
 
-    /* header style: small and clearer */
     .data-table th {
       background: linear-gradient(90deg, #5C67BC);
       color: #fff;
@@ -511,7 +559,6 @@ export default function RfidCard() {
       letter-spacing: 0.2px;
     }
 
-    /* compact cell text (smaller inner data) */
     .data-table td {
       padding: 6px 6px;
       border-bottom: 1px solid #f2f2f2;
@@ -523,13 +570,13 @@ export default function RfidCard() {
       vertical-align: middle;
     }
 
-    .data-table td { font-size: 9.5px; } /* inner data smaller as requested */
+    .data-table td { font-size: 9.5px; }
 
     .data-table th:first-child,
     .data-table td:first-child {
-      padding-left: 8px;   /* nudged right */
+      padding-left: 8px;
       padding-right: 8px;
-      text-align: right;   /* S.No right-aligned */
+      text-align: right;
       width: 42px;
       max-width: 42px;
       font-size: 10px;
@@ -545,7 +592,6 @@ export default function RfidCard() {
     .col-mobile { max-width: 100px; }
     .col-family { max-width: 70px; }
 
-    /* ACTION column: shift left inside table and align buttons to left */
     .data-table th:last-child,
     .data-table td:last-child {
       padding-left: 8px;
@@ -553,11 +599,10 @@ export default function RfidCard() {
       width: 72px;
       max-width: 72px;
     }
-    .action-buttons { display: flex; gap: 6px; align-items: center; justify-content: flex-start; /* left aligned */ }
+    .action-buttons { display: flex; gap: 6px; align-items: center; justify-content: flex-start; }
     .action-buttons .btn { display: inline-flex; align-items:center; justify-content:center; width:34px; height:34px; padding:0; border-radius:8px; }
     .action-buttons .btn i { margin:0; font-size:14px; }
 
-    /* left-align the multi-line numeric headers and nudge left */
     th.col-waterday .th-split,
     th.col-watermonth .th-split,
     th.col-totallitres .th-split,
@@ -577,13 +622,6 @@ export default function RfidCard() {
     .th-split .top { display:block; font-weight:800; font-size:9px; }
     .th-split .bottom { display:block; font-weight:700; font-size:8px; opacity:0.95; }
 
-    th.col-waterday .th-split { text-align:left; }
-    th.col-watermonth .th-split { text-align:left; }
-    th.col-totallitres .th-split { text-align:left; }
-    th.col-remaining .th-split { text-align:left; }
-    th:nth-child(12) .th-split { text-align:left; }
-
-    /* modern filter button - visible */
     .filter-btn {
       display:inline-flex;
       align-items:center;
@@ -602,7 +640,6 @@ export default function RfidCard() {
     .filter-btn:active { transform: translateY(1px) scale(0.998); }
     .filter-btn:focus { outline: 2px solid rgba(59,130,246,0.22); outline-offset: 2px; }
 
-    /* Overlay dims the background but does NOT blur it */
     .filter-modal-overlay {
       position: fixed;
       inset: 0;
@@ -610,13 +647,12 @@ export default function RfidCard() {
       align-items:center;
       justify-content:center;
       z-index:1000;
-      background: rgba(10,12,20,0.36); /* dark translucent dim */
+      background: rgba(10,12,20,0.36);
       animation: fadeIn .12s ease;
       -webkit-tap-highlight-color: transparent;
     }
     @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
 
-    /* Modal: white modern card (no blur inside) */
     .filter-modal {
       width: 440px;
       max-width: calc(100% - 32px);
@@ -677,14 +713,13 @@ export default function RfidCard() {
       border:1px solid rgba(99,102,241,0.12);
     }
 
-    /* Active popup overlay & card grid */
     .active-popup-overlay {
       position: fixed;
       inset: 0;
       display:flex;
-      align-items:flex-start; /* slightly lower (not centered) */
+      align-items:flex-start;
       justify-content:center;
-      padding-top: 60px; /* push popup down */
+      padding-top: 60px;
       z-index:1100;
       background: rgba(10,12,20,0.36);
     }
@@ -721,6 +756,7 @@ export default function RfidCard() {
       text-align:center;
     }
     .uid-card:hover{transform:translateY(-4px);box-shadow:0 12px 25px rgba(12,20,60,0.1);}
+    .uid-meta { display:block; font-size:11px; color:#374151; margin-top:6px; font-weight:600; }
     .btn-close {
       padding:10px 16px;
       border-radius:10px;
@@ -752,6 +788,7 @@ export default function RfidCard() {
     }
   `;
 
+  // ------------------ JSX ------------------
   return (
     <>
       <style>{css}</style>
@@ -805,7 +842,18 @@ export default function RfidCard() {
                 </button>
 
                 {activeDateFilter ? (
-                  <span className="active-filter-pill" title="Active date filter">Date filter</span>
+                  <span
+                    className="active-filter-pill"
+                    title={
+                      activeDateFilter.fromLabel === activeDateFilter.toLabel
+                        ? `Active: ${activeDateFilter.fromLabel}`
+                        : `Active: ${activeDateFilter.fromLabel} → ${activeDateFilter.toLabel}`
+                    }
+                  >
+                    {activeDateFilter.fromLabel === activeDateFilter.toLabel
+                      ? activeDateFilter.fromLabel
+                      : `${activeDateFilter.fromLabel} → ${activeDateFilter.toLabel}`}
+                  </span>
                 ) : null}
 
                 <button
@@ -987,8 +1035,8 @@ export default function RfidCard() {
                   <button className="page-btn" onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages}>Last</button>
 
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <label style={{ color: '#6b7280', fontSize: 12 }}>Go to</label>
-                    <input type="number" min={1} max={totalPages} value={currentPage} onChange={(e) => goToPage(e.target.value)} className="select" style={{ width:72 }} />
+                    {/* <label style={{ color: '#6b7280', fontSize: 12 }}>Go to</label> */}
+                    {/* <input type="number" min={1} max={totalPages} value={currentPage} onChange={(e) => goToPage(e.target.value)} className="select" style={{ width:72 }} /> */}
                   </div>
                 </div>
               </div>
@@ -1023,11 +1071,21 @@ export default function RfidCard() {
         </div>
       )}
 
-      {/* Active Cards Popup */}
+      {/* Active Cards Popup (client-derived only) */}
       {showActivePopup && (
         <div className="active-popup-overlay" onClick={() => setShowActivePopup(false)} role="presentation">
           <div className="active-popup" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ textAlign: 'center' }}>Active Cards : {activeCards.length}</h3>
+            <h3 style={{ textAlign: 'center' }}>
+              Active Cards : <span style={{ fontWeight: 900, marginLeft: 8 }}>{activeCards.length}</span>
+            </h3>
+
+            {activeDateFilter ? (
+              <div style={{ textAlign: 'center', fontSize: 12, fontWeight: 600, opacity: 0.85, marginTop: 6 }}>
+                {activeDateFilter.fromLabel === activeDateFilter.toLabel
+                  ? activeDateFilter.fromLabel
+                  : `${activeDateFilter.fromLabel} → ${activeDateFilter.toLabel}`}
+              </div>
+            ) : null}
 
             <div className="active-grid">
               {activeCards.length ? (
@@ -1038,7 +1096,13 @@ export default function RfidCard() {
                     onClick={() => { if (c && c.rfid_uid) navigate(`/rfidhistory/${c.rfid_uid}`); }}
                     title={c && c.rfid_uid ? `View history for ${c.rfid_uid}` : ''}
                   >
-                    {c && c.rfid_uid ? c.rfid_uid : '—'}
+                    <div>
+                      <div style={{ color: "#1e40af", fontWeight: 900 }}>{c.rfid_uid}</div>
+                      {/* show brief metadata if available */}
+                      {(c.user_name || c.mobile_no) ? (
+                        <div className="uid-meta">{c.user_name ? c.user_name : ""}{c.user_name && c.mobile_no ? " · " : ""}{c.mobile_no ? c.mobile_no : ""}</div>
+                      ) : null}
+                    </div>
                   </div>
                 ))
               ) : (

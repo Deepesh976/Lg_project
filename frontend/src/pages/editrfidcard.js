@@ -45,6 +45,16 @@ function EditRfidCard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // these keys are visible but not editable (like RFID UID)
+  const readOnlyKeys = [
+    "rfid_uid",
+    "quant_water_alloted_per_day",
+    "quant_water_alloted_per_month",
+    "swipe_count",
+    "total_litres_consumed",
+    "remaining_card_balance",
+  ];
+
   const labels = {
     rfid_serial_no: "RFID Card Serial Number",
     rfid_uid: "RFID UID",
@@ -128,25 +138,21 @@ function EditRfidCard() {
     try {
       setLoading(true);
 
+      // Build payload but OMIT read-only keys so client cannot change them
       const payload = {
         rfid_serial_no: (form.rfid_serial_no || "").trim(),
-        // 👇 UID excluded from editing (only included for payload reference)
-        rfid_uid: form.rfid_uid,
         user_name: (form.user_name || "").trim(),
         address: (form.address || "").trim(),
         village: (form.village || "").trim(),
         aadhar_no: (form.aadhar_no || "").toString().trim(),
         mobile_no: (form.mobile_no || "").toString().trim(),
         family_mems: Number(form.family_mems) || 0,
-        quant_water_alloted_per_day:
-          Number(form.quant_water_alloted_per_day) || 0,
-        quant_water_alloted_per_month:
-          Number(form.quant_water_alloted_per_month) || 0,
-        swipe_count: Number(form.swipe_count) || 0,
-        total_litres_consumed: Number(form.total_litres_consumed) || 0,
-        remaining_card_balance: Number(form.remaining_card_balance) || 0,
         remarks: (form.remarks || "").trim(),
       };
+
+      // If you want to include RFID UID in payload for server reference without editing,
+      // include it under a separate field (e.g. rfid_uid_reference) — uncomment if needed:
+      // payload.rfid_uid_reference = form.rfid_uid;
 
       await axios.put(`/api/rfid/${id}`, payload);
       alert("RFID record updated successfully!");
@@ -225,33 +231,35 @@ function EditRfidCard() {
 
       {!loading && !error && (
         <form style={styles.form} onSubmit={handleUpdate}>
-          {allowedFields.map((key) => (
-            <div key={key} style={styles.labelContainer}>
-              <label htmlFor={key} style={styles.label}>
-                {labels[key] || key}
-              </label>
-              <input
-                id={key}
-                type={
-                  [
-                    "family_mems",
-                    "quant_water_alloted_per_day",
-                    "quant_water_alloted_per_month",
-                    "swipe_count",
-                    "total_litres_consumed",
-                    "remaining_card_balance",
-                  ].includes(key)
-                    ? "number"
-                    : "text"
-                }
-                name={key}
-                value={form[key] ?? ""}
-                onChange={handleChange}
-                style={key === "rfid_uid" ? styles.disabledInput : styles.input}
-                disabled={key === "rfid_uid"} // 🔒 make RFID UID non-editable
-              />
-            </div>
-          ))}
+          {allowedFields.map((key) => {
+            const isNumber = [
+              "family_mems",
+              "quant_water_alloted_per_day",
+              "quant_water_alloted_per_month",
+              "swipe_count",
+              "total_litres_consumed",
+              "remaining_card_balance",
+            ].includes(key);
+
+            const isReadOnly = readOnlyKeys.includes(key);
+
+            return (
+              <div key={key} style={styles.labelContainer}>
+                <label htmlFor={key} style={styles.label}>
+                  {labels[key] || key}
+                </label>
+                <input
+                  id={key}
+                  type={isNumber ? "number" : "text"}
+                  name={key}
+                  value={form[key] ?? ""}
+                  onChange={handleChange}
+                  style={isReadOnly ? styles.disabledInput : styles.input}
+                  disabled={isReadOnly}
+                />
+              </div>
+            );
+          })}
 
           <div style={styles.actions}>
             <button type="submit" style={styles.btnPrimary} disabled={loading}>
