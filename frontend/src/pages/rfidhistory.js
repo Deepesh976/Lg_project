@@ -3,8 +3,11 @@ import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 
 /**
- * RFID History — minimal change: make today's litres summation robust.
- * All other logic preserved as you provided.
+ * RfidHistory — full updated version
+ * - DD-MM-YYYY everywhere
+ * - Filtered summary card shown when filter active
+ * - CSV download: filtered rows if filter active, otherwise all rows
+ * - CSV date format DD-MM-YYYY (hyphens) and time HH:MM:SS
  */
 
 export default function RfidHistory() {
@@ -30,6 +33,7 @@ export default function RfidHistory() {
 
   useEffect(() => {
     if (id) fetchViaProxy(id);
+    else setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -42,7 +46,6 @@ export default function RfidHistory() {
       const res = await axios.get(url, { timeout: 15000 });
       const data = res?.data ?? {};
 
-      // Discover array in common shapes (unchanged order)
       let records = [];
       if (Array.isArray(data.response)) records = data.response;
       else if (Array.isArray(data)) records = data;
@@ -53,42 +56,15 @@ export default function RfidHistory() {
         records = arr || [];
       }
 
-      // DO NOT sort — use backend order directly
-      setHistory(records);
-
-      // optional: notify other components that this UID's history updated
-      try {
-        let uidToNotify = null;
-        if (Array.isArray(records) && records.length > 0) {
-          const first = records[0];
-          uidToNotify =
-            first.RFID_UID ||
-            first["RFID UID"] ||
-            first.rfid_uid ||
-            first.uid ||
-            first.RFID ||
-            null;
-        }
-        if (!uidToNotify) uidToNotify = id;
-        if (uidToNotify) {
-          const detail = { rfidUid: String(uidToNotify).trim() };
-          window.dispatchEvent(new CustomEvent("rfid-history-updated", { detail }));
-        }
-      } catch (e) {
-        // ignore
-      }
+      // keep backend order
+      setHistory(records || []);
 
       if (!records.length) setError("No data found for this RFID UID");
     } catch (err) {
       console.error("fetchViaProxy error:", err);
-      if (err.response)
-        setError(
-          `Proxy/Device returned ${err.response.status}: ${JSON.stringify(
-            err.response.data
-          )}`
-        );
-      else if (err.request)
-        setError("No response from proxy. Ensure backend can reach the device.");
+      if (err?.response)
+        setError(`Proxy/Device returned ${err.response.status}: ${JSON.stringify(err.response.data)}`);
+      else if (err?.request) setError("No response from proxy. Ensure backend can reach the device.");
       else setError(err.message || "Unknown error from proxy fetch.");
     } finally {
       setLoading(false);
@@ -96,7 +72,7 @@ export default function RfidHistory() {
     }
   };
 
-  /* ----------------- Helpers: field extraction & robust date detection ----------------- */
+  /* ----------------- Helpers ----------------- */
 
   const getField = (obj, keys) => {
     if (!obj) return "—";
@@ -105,8 +81,7 @@ export default function RfidHistory() {
       if (k in obj && obj[k] !== null && obj[k] !== undefined && obj[k] !== "") return obj[k];
       if (typeof k === "string") {
         const camel = k.replace(/[_\s]+([a-zA-Z])/g, (_, c) => c.toUpperCase()).replace(/\s/g, "");
-        if (camel in obj && obj[camel] !== null && obj[camel] !== undefined && obj[camel] !== "")
-          return obj[camel];
+        if (camel in obj && obj[camel] !== null && obj[camel] !== undefined && obj[camel] !== "") return obj[camel];
         const underscored = k.replace(/\s+/g, "_");
         if (underscored in obj && obj[underscored] !== null && obj[underscored] !== undefined && obj[underscored] !== "")
           return obj[underscored];
@@ -131,79 +106,28 @@ export default function RfidHistory() {
     return Number.isFinite(n) ? n : v;
   };
 
-  // Robustly extract a Date object (or null) from a record
-  const getRecordDate = (rec) => {
-    if (!rec || typeof rec !== "object") return null;
-
-    // try numeric timestamp fields first (epoch seconds or ms)
-    const tsCandidate = getField(rec, ["timestamp", "timeStamp", "ts", "time", "createdAt", "created_at", "updatedAt", "updated_at"]);
-    if (tsCandidate !== undefined && tsCandidate !== null && tsCandidate !== "") {
-      const s = String(tsCandidate).trim();
-      if (/^-?\d+$/.test(s)) {
-        // digits only -> epoch (10 or 13+ digits)
-        if (s.length <= 10) return new Date(Number(s) * 1000);
-        return new Date(Number(s));
-      }
-      // try ISO parse
-      const iso = Date.parse(s);
-      if (!Number.isNaN(iso)) return new Date(iso);
-    }
-
-    // If TxnDate and TxnTime exist separately, combine and parse
-    const txnDate = getField(rec, ["TxnDate", "Txn_Date", "Date", "date"]);
-    const txnTime = getField(rec, ["TxnTime", "time", "Time"]);
-    if (txnDate && txnDate !== "—") {
-      const combined = txnTime && txnTime !== "—" ? `${String(txnDate).trim()} ${String(txnTime).trim()}` : String(txnDate).trim();
-      const p = tryParseDateString(combined);
-      if (p) return p;
-    }
-
-    // try common date-like fields
-    const candidates = [
-      getField(rec, ["dateTime", "datetime", "DateTime", "Date_Time", "date_time", "TxnDateTime", "transaction_datetime"]),
-      getField(rec, ["Date", "date", "TxnDate", "transaction_date"]),
-      getField(rec, ["Time", "time", "TxnTime", "transaction_time"]),
-    ].filter(Boolean);
-
-    for (const c of candidates) {
-      if (c && c !== "—") {
-        const p = tryParseDateString(String(c));
-        if (p) return p;
-      }
-    }
-
-    // try all string fields searching for a date-like token
-    for (const key of Object.keys(rec)) {
-      const val = rec[key];
-      if (!val) continue;
-      if (typeof val === "string" && /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})|(\d{10,13})/.test(val)) {
-        const p = tryParseDateString(String(val));
-        if (p) return p;
-      }
-    }
-
-    // fallback: try Date.parse on whole record string
-    try {
-      const str = JSON.stringify(rec);
-      const p = tryParseDateString(str);
-      if (p) return p;
-    } catch (e) {
-      // ignore
-    }
-
-    return null;
+  const formatDDMMYYYY = (d) => {
+    if (!d || !(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
   };
 
-  // helper: try parsing flexible date strings (ISO, yyyy-mm-dd, dd/mm/yyyy, epoch tokens)
+  const formatTimeHHMMSS = (d) => {
+    if (!d || !(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${hh}:${mi}:${ss}`;
+  };
+
+  // prefer day-first formats before Date.parse
   const tryParseDateString = (s) => {
     if (!s) return null;
     const str = String(s).trim();
 
-    // ISO first
-    const iso = Date.parse(str);
-    if (!Number.isNaN(iso)) return new Date(iso);
-
-    // find epoch token
+    // epoch token
     const epochMatch = str.match(/(^|\D)(\d{10,13})(\D|$)/);
     if (epochMatch) {
       const digits = epochMatch[2];
@@ -212,53 +136,86 @@ export default function RfidHistory() {
       return new Date(n);
     }
 
-    // try dd/mm/yyyy or dd-mm-yyyy or mm/dd/yyyy heuristic (prefer day-first if ambiguous)
     const parts = str.split(/\s+/);
     const datePart = parts[0];
     const timePart = parts.slice(1).join(" ");
 
     const dmy = datePart.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
     if (dmy) {
-      let a = Number(dmy[1]);
-      let b = Number(dmy[2]);
-      let c = String(dmy[3]);
-      if (c.length === 2) c = "20" + c;
-      let day, month, year;
-      if (a > 12) {
-        day = String(a).padStart(2, "0");
-        month = String(b).padStart(2, "0");
-      } else if (b > 12) {
-        month = String(a).padStart(2, "0");
-        day = String(b).padStart(2, "0");
-      } else {
-        // ambiguous: prefer day-first
-        day = String(a).padStart(2, "0");
-        month = String(b).padStart(2, "0");
-      }
-      year = String(c);
-      const isoLike = `${year}-${month}-${day}` + (timePart ? ` ${timePart}` : "");
+      let dd = dmy[1].padStart(2, "0");
+      let mm = dmy[2].padStart(2, "0");
+      let yy = dmy[3];
+      if (yy.length === 2) yy = "20" + yy;
+      const isoLike = `${yy}-${mm}-${dd}${timePart ? " " + timePart : ""}`;
       const parsed = Date.parse(isoLike);
       if (!Number.isNaN(parsed)) return new Date(parsed);
     }
 
-    // yyyy-mm-dd
     const ymd = datePart.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
     if (ymd) {
-      const isoLike =
-        `${ymd[1]}-${String(ymd[2]).padStart(2, "0")}-${String(ymd[3]).padStart(2, "0")}` +
-        (timePart ? ` ${timePart}` : "");
+      const isoLike = `${ymd[1]}-${String(ymd[2]).padStart(2, "0")}-${String(ymd[3]).padStart(2, "0")}${timePart ? " " + timePart : ""}`;
       const parsed = Date.parse(isoLike);
       if (!Number.isNaN(parsed)) return new Date(parsed);
     }
 
-    // last resort
     const last = Date.parse(str);
     if (!Number.isNaN(last)) return new Date(last);
+    return null;
+  };
+
+  const getRecordDate = (rec) => {
+    if (!rec || typeof rec !== "object") return null;
+
+    const tsCandidate = getField(rec, [
+      "timestamp",
+      "timeStamp",
+      "ts",
+      "time",
+      "createdAt",
+      "created_at",
+      "updatedAt",
+      "updated_at",
+      "dateTime",
+      "datetime",
+    ]);
+    if (tsCandidate !== undefined && tsCandidate !== null && tsCandidate !== "") {
+      const s = String(tsCandidate).trim();
+      if (/^-?\d+$/.test(s)) {
+        if (s.length <= 10) return new Date(Number(s) * 1000);
+        return new Date(Number(s));
+      }
+      const p = tryParseDateString(s);
+      if (p) return p;
+    }
+
+    const txnDate = getField(rec, ["TxnDate", "Txn_Date", "Date", "date"]);
+    const txnTime = getField(rec, ["TxnTime", "time", "Time"]);
+    if (txnDate && txnDate !== "—") {
+      const combined = txnTime && txnTime !== "—" ? `${String(txnDate).trim()} ${String(txnTime).trim()}` : String(txnDate).trim();
+      const p = tryParseDateString(combined);
+      if (p) return p;
+    }
+
+    for (const key of Object.keys(rec)) {
+      const val = rec[key];
+      if (!val) continue;
+      if (typeof val === "string" && /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})|(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})|(\d{10,13})/.test(val)) {
+        const p = tryParseDateString(val);
+        if (p) return p;
+      }
+    }
+
+    try {
+      const str = JSON.stringify(rec);
+      const p = tryParseDateString(str);
+      if (p) return p;
+    } catch (e) {}
 
     return null;
   };
 
-  /* ----------------- filtering & pagination (use getRecordDate) ----------------- */
+  /* ----------------- filtering & pagination ----------------- */
+
   const viewData = useMemo(() => {
     if (!activeFilter) return history;
     const { from, to } = activeFilter;
@@ -274,7 +231,8 @@ export default function RfidHistory() {
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
-  }, [totalPages]); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalPages]);
 
   const paginatedData = viewData.slice((page - 1) * pageSize, page * pageSize);
 
@@ -285,7 +243,7 @@ export default function RfidHistory() {
   };
 
   /* ----------------- summaries ----------------- */
-  // Total litres across entire history (backend data) — safer than relying on filtering-side date parsing
+
   const totalLitres = useMemo(() => {
     return history.reduce(
       (sum, r) =>
@@ -294,7 +252,6 @@ export default function RfidHistory() {
           "Litres Consumed",
           "Litres",
           "litres_consumed",
-          "litres",
           "litre",
           "liter",
           "volume",
@@ -308,14 +265,11 @@ export default function RfidHistory() {
     dateA.getMonth() === dateB.getMonth() &&
     dateA.getDate() === dateB.getDate();
 
-  // === UPDATED: Today's litres computed from history (based on local day).
-  // Uses getRecordDate first; if that returns null it attempts to combine Date + Time fields and parse.
   const todaysLitres = useMemo(() => {
     const nowLocal = new Date();
-    return history.reduce((sum, r) => {
+    return history.reduce((sumAcc, r) => {
       let d = getRecordDate(r);
 
-      // If parsing failed, attempt to construct from date/time fields explicitly
       if (!d) {
         const df = getField(r, ["Date", "date", "TxnDate"]);
         const tf = getField(r, ["Time", "time", "TxnTime"]);
@@ -325,56 +279,128 @@ export default function RfidHistory() {
         }
       }
 
-      if (!d) return sum;
+      if (!d) return sumAcc;
       if (isSameLocalDay(d, nowLocal)) {
-        return (
-          sum +
-          parseNumberField(r, [
-            "Litres Consumed",
-            "Litres",
-            "litres_consumed",
-            "litres",
-            "litre",
-            "liter",
-            "volume",
-          ])
-        );
+        return sumAcc + parseNumberField(r, ["Litres Consumed", "Litres", "litres_consumed", "volume"]);
       }
-      return sum;
+      return sumAcc;
     }, 0);
   }, [history]);
 
-  /* ----------------- download last 30 days CSV ----------------- */
-  const downloadLast30CSV = () => {
-    const today = new Date();
-    const from = new Date(today);
-    from.setDate(from.getDate() - 30);
+  // NEW: total litres for the active filter (calculated from viewData)
+  const filteredLitres = useMemo(() => {
+    if (!activeFilter) return 0;
+    return viewData.reduce(
+      (sum, r) =>
+        sum +
+        parseNumberField(r, [
+          "Litres Consumed",
+          "Litres",
+          "litres_consumed",
+          "litre",
+          "liter",
+          "volume",
+        ]),
+      0
+    );
+  }, [viewData, activeFilter]);
 
-    const last30 = history.filter((r) => {
-      const d = getRecordDate(r);
-      return d && d >= from && d <= today;
-    });
+  /* ----------------- CSV Download (all rows or filtered rows) ----------------- */
 
-    if (!last30.length) {
-      alert("No data for the last 30 days.");
+  const camelize = (s) =>
+    String(s)
+      .replace(/[_\s]+([a-zA-Z])/g, (_, c) => c.toUpperCase())
+      .replace(/\s/g, "");
+
+  const downloadCSV = () => {
+    // choose source: filtered viewData when filter active -> otherwise all history
+    const rows = activeFilter ? viewData : history;
+    if (!rows || rows.length === 0) {
+      alert("No data to download.");
+      setDownloadOpen(false);
       return;
     }
 
-    const headers = Array.from(new Set(last30.flatMap((o) => Object.keys(o))));
-    const csvRows = [headers.join(",")];
-    last30.forEach((r) => csvRows.push(headers.map((h) => JSON.stringify(r[h] ?? "")).join(",")));
+    // build headers preserving first-seen order
+    const headerOrder = [];
+    const seen = new Set();
+    rows.forEach((r) => {
+      Object.keys(r || {}).forEach((k) => {
+        if (!seen.has(k)) {
+          seen.add(k);
+          headerOrder.push(k);
+        }
+      });
+    });
 
-    const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+    // bring common date/time keys to front for readability
+    const prefer = ["Date", "date", "TxnDate", "dateTime", "datetime", "Time", "time", "TxnTime", "timestamp", "ts"];
+    for (let i = prefer.length - 1; i >= 0; --i) {
+      const key = prefer[i];
+      const idx = headerOrder.findIndex((h) => h === key);
+      if (idx >= 0) {
+        headerOrder.splice(idx, 1);
+        headerOrder.unshift(key);
+      }
+    }
+
+    // helper sets
+    const dateKeyNames = new Set(["Date", "date", "TxnDate", "dateTime", "datetime"]);
+    const timeKeyNames = new Set(["Time", "time", "TxnTime"]);
+    const otherDateLikeKeys = new Set(["timestamp", "ts"]);
+
+    const rowsCsv = [];
+    // header CSV (escaped)
+    rowsCsv.push(headerOrder.map((h) => `"${String(h).replace(/"/g, '""')}"`).join(","));
+
+    for (const r of rows) {
+      const parsed = getRecordDate(r);
+      const cells = headerOrder.map((h) => {
+        // Use parsed date/time for date/time-looking headers if available
+        if (dateKeyNames.has(h) || otherDateLikeKeys.has(h) || /date/i.test(h)) {
+          if (parsed) return `"${formatDDMMYYYY(parsed)}"`;
+          const raw = r[h] ?? r[camelize(h)] ?? "";
+          if (raw === null || raw === undefined) return '""';
+          return `"${String(raw).replace(/\//g, "-").replace(/"/g, '""')}"`;
+        }
+
+        if (timeKeyNames.has(h) || /time/i.test(h)) {
+          if (parsed) return `"${formatTimeHHMMSS(parsed)}"`;
+          const raw = r[h] ?? r[camelize(h)] ?? "";
+          return `"${String(raw).replace(/"/g, '""')}"`;
+        }
+
+        const val = r[h] ?? r[camelize(h)] ?? "";
+        const out = typeof val === "object" ? JSON.stringify(val) : String(val);
+        return `"${out.replace(/"/g, '""')}"`;
+      });
+      rowsCsv.push(cells.join(","));
+    }
+
+    const blob = new Blob([rowsCsv.join("\n")], { type: "text/csv;charset=utf-8;" });
+
+    // filename reflects filter state
+    let filename = `RFID_Export_${id}`;
+    if (activeFilter) {
+      const fromLabel = formatDDMMYYYY(activeFilter.from);
+      const toLabel = formatDDMMYYYY(activeFilter.to);
+      filename += `_filtered_${fromLabel}_to_${toLabel}`;
+    } else {
+      filename += `_all`;
+    }
+    filename += `.csv`;
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `RFID_Last30Days_${id}.csv`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
     setDownloadOpen(false);
   };
 
   /* ----------------- filter handlers ----------------- */
+
   const openFilter = () => {
     if (activeFilter) {
       setFilterFrom(activeFilter.from.toISOString().slice(0, 10));
@@ -410,15 +436,10 @@ export default function RfidHistory() {
     setPage(1);
   };
 
-  const fmtDate = (d) => {
-    if (!d) return "";
-    const year = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${year}-${m}-${dd}`;
-  };
+  const fmtDateLabel = (d) => (d ? formatDDMMYYYY(d) : "");
 
   /* ----------------- render ----------------- */
+
   const headers = [
     "S.No",
     "RFID_UID",
@@ -431,9 +452,8 @@ export default function RfidHistory() {
     "Price Per Litre",
   ];
 
-  // Filter button label: show selected range if active
   const filterButtonLabel = activeFilter
-    ? `🔎 Filter (${fmtDate(activeFilter.from)} → ${fmtDate(activeFilter.to)})`
+    ? `🔎 Filter (${fmtDateLabel(activeFilter.from)} → ${fmtDateLabel(activeFilter.to)})`
     : "🔎 Filter";
 
   return (
@@ -446,35 +466,11 @@ export default function RfidHistory() {
             </button>
 
             <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
-              <button
-                onClick={openFilter}
-                style={styles.filterBtn}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-4px)";
-                  e.currentTarget.style.boxShadow = "0 12px 30px rgba(37,99,235,0.18)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "0 6px 20px rgba(37,99,235,0.12)";
-                }}
-                title="Filter by date range"
-              >
+              <button onClick={openFilter} style={styles.filterBtn} title="Filter by date range">
                 {filterButtonLabel}
               </button>
 
-              <button
-                onClick={() => setDownloadOpen(true)}
-                style={styles.downloadBtn}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-4px)";
-                  e.currentTarget.style.boxShadow = "0 12px 30px rgba(5,150,105,0.18)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "0 6px 20px rgba(5,150,105,0.12)";
-                }}
-                title="Download last 30 days CSV"
-              >
+              <button onClick={() => setDownloadOpen(true)} style={styles.downloadBtn} title="Download CSV">
                 ⬇️ Download
               </button>
             </div>
@@ -483,35 +479,29 @@ export default function RfidHistory() {
           <h2 style={styles.heading}>RFID Card History</h2>
 
           <div style={styles.cardsRow}>
-            <div
-              style={styles.summaryCardLight}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-4px)";
-                e.currentTarget.style.boxShadow = "0 12px 30px rgba(96,165,250,0.18)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 6px 18px rgba(0,0,0,0.08)";
-              }}
-            >
+            <div style={styles.summaryCardLight}>
               <div style={{ fontSize: 15 }}>Today's Litres Consumed</div>
               <div style={{ fontSize: 24, marginTop: 8, fontWeight: 800 }}>{todaysLitres.toFixed(2)} L</div>
             </div>
 
-            <div
-              style={styles.summaryCardGreen}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-4px)";
-                e.currentTarget.style.boxShadow = "0 12px 30px rgba(34,197,94,0.12)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 6px 18px rgba(0,0,0,0.08)";
-              }}
-            >
+            <div style={styles.summaryCardGreen}>
               <div style={{ fontSize: 15 }}>Total Litres Consumed</div>
               <div style={{ fontSize: 24, marginTop: 8, fontWeight: 800 }}>{totalLitres.toFixed(2)} L</div>
             </div>
+
+            {/* NEW: show filtered card only when a filter is active */}
+            {activeFilter && (
+              <div style={styles.summaryCardBlue}>
+                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>
+                  Filtered Date:
+                </div>
+                <div style={{ fontSize: 13, marginBottom: 8 }}>
+                  {fmtDateLabel(activeFilter.from)} → {fmtDateLabel(activeFilter.to)}
+                </div>
+                <div style={{ fontSize: 15, marginTop: 4 }}>Litres in range</div>
+                <div style={{ fontSize: 22, marginTop: 8, fontWeight: 800 }}>{filteredLitres.toFixed(2)} L</div>
+              </div>
+            )}
           </div>
 
           {loading && <div style={styles.empty}>Loading data...</div>}
@@ -545,10 +535,10 @@ export default function RfidHistory() {
                         const litres = getField(item, ["Litres Consumed", "Litres", "litres_consumed", "litres", "litre", "liter", "volume"]);
                         const amount = getField(item, ["Amount Debited", "AmountDebited", "amount_debited", "amount"]);
                         const price = getField(item, ["Price Per Litre", "PricePerLitre", "price_per_litre", "price"]);
-                        const dateField = getField(item, ["Date", "date", "dateTime", "DateTime", "TxnDate"]);
-                        const timeField = getField(item, ["Time", "time", "TxnTime"]);
-                        const dateStr = dateField || "—";
-                        const timeStr = timeField || "—";
+
+                        const parsed = getRecordDate(item);
+                        const dateDisplay = parsed ? formatDDMMYYYY(parsed) : (getField(item, ["Date", "date", "TxnDate", "dateTime"]) || "—");
+                        const timeDisplay = parsed ? formatTimeHHMMSS(parsed) : (getField(item, ["Time", "time", "TxnTime"]) || "—");
 
                         return (
                           <tr key={i}>
@@ -556,8 +546,8 @@ export default function RfidHistory() {
                             <td style={styles.td}>{rfid}</td>
                             <td style={styles.td}>{deviceId}</td>
                             <td style={styles.td}>{safeNum(remaining)}</td>
-                            <td style={styles.td}>{dateStr}</td>
-                            <td style={styles.td}>{timeStr}</td>
+                            <td style={styles.td}>{dateDisplay}</td>
+                            <td style={styles.td}>{timeDisplay}</td>
                             <td style={styles.td}>{safeNum(litres)}</td>
                             <td style={styles.td}>{safeNum(amount)}</td>
                             <td style={styles.td}>{safeNum(price)}</td>
@@ -645,7 +635,7 @@ export default function RfidHistory() {
         </div>
       </div>
 
-      {/* Filter Modal (glassy) */}
+      {/* Filter Modal */}
       {filterOpen && (
         <GlassModal onClose={() => setFilterOpen(false)}>
           <h3 style={{ textAlign: "center", color: "#1e293b" }}>🗓 Filter by Date</h3>
@@ -678,14 +668,16 @@ export default function RfidHistory() {
       {/* Download Modal */}
       {downloadOpen && (
         <GlassModal onClose={() => setDownloadOpen(false)}>
-          <h3 style={{ textAlign: "center", color: "#1e293b" }}>⬇️ Download 30 Days Data</h3>
+          <h3 style={{ textAlign: "center", color: "#1e293b" }}>⬇️ Download CSV</h3>
           <p style={{ textAlign: "center", marginBottom: 20 }}>
-            This is your 30 Days data from{" "}
-            <b>{new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}</b> to{" "}
-            <b>{new Date().toISOString().slice(0, 10)}</b>.
+            {activeFilter ? (
+              <>Downloading filtered data: <b>{formatDDMMYYYY(activeFilter.from)} → {formatDDMMYYYY(activeFilter.to)}</b></>
+            ) : (
+              <>Downloading all data for this card</>
+            )}
           </p>
           <div style={{ display: "flex", justifyContent: "center" }}>
-            <button onClick={downloadLast30CSV} style={styles.gradientDownloadBtn}>
+            <button onClick={downloadCSV} style={styles.gradientDownloadBtn}>
               ⬇️ Download CSV
             </button>
           </div>
@@ -769,6 +761,7 @@ const styles = {
   cardsRow: { display: "flex", justifyContent: "center", gap: 20, marginTop: -6, marginBottom: 12, flexWrap: "wrap" },
   summaryCardLight: { flex: "0 0 260px", padding: "16px 18px", borderRadius: 12, background: "linear-gradient(135deg,#e0f2fe,#bfdbfe)", boxShadow: "0 6px 18px rgba(0,0,0,0.08)", textAlign: "center", fontWeight: 700, transition: "transform 0.18s ease, box-shadow 0.18s ease" },
   summaryCardGreen: { flex: "0 0 260px", padding: "16px 18px", borderRadius: 12, background: "linear-gradient(135deg,#dcfce7,#bbf7d0)", boxShadow: "0 6px 18px rgba(0,0,0,0.08)", textAlign: "center", fontWeight: 700, transition: "transform 0.18s ease, box-shadow 0.18s ease" },
+  summaryCardBlue: { flex: "0 0 300px", padding: "14px 18px", borderRadius: 12, background: "linear-gradient(135deg,#e6f0ff,#d5e6ff)", boxShadow: "0 6px 18px rgba(0,0,0,0.06)", textAlign: "center", fontWeight: 700, transition: "transform 0.18s ease, box-shadow 0.18s ease" },
   tableWrap: { overflowX: "auto", borderRadius: 8, border: "1px solid #e6e8ea" },
   table: { width: "100%", borderCollapse: "collapse", minWidth: 900 },
   th: { padding: 12, background: "#0b74ff", color: "#fff", textAlign: "center", fontWeight: 700 },
