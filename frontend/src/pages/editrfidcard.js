@@ -46,10 +46,9 @@ function EditRfidCard() {
   const [error, setError] = useState("");
 
   // these keys are visible but not editable (like RFID UID)
+  // NOTE: I removed quant_water_alloted_per_day and quant_water_alloted_per_month from readOnlyKeys
   const readOnlyKeys = [
     "rfid_uid",
-    "quant_water_alloted_per_day",
-    "quant_water_alloted_per_month",
     "swipe_count",
     "total_litres_consumed",
     "remaining_card_balance",
@@ -129,7 +128,10 @@ function EditRfidCard() {
   };
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type } = e.target;
+
+    // keep numbers as strings in form state so inputs behave well,
+    // but ensure numeric fields cannot accept invalid text (browser handles with type="number")
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -138,7 +140,7 @@ function EditRfidCard() {
     try {
       setLoading(true);
 
-      // Build payload but OMIT read-only keys so client cannot change them
+      // Build payload: include editable water fields (as numbers) and other editable fields
       const payload = {
         rfid_serial_no: (form.rfid_serial_no || "").trim(),
         user_name: (form.user_name || "").trim(),
@@ -147,12 +149,18 @@ function EditRfidCard() {
         aadhar_no: (form.aadhar_no || "").toString().trim(),
         mobile_no: (form.mobile_no || "").toString().trim(),
         family_mems: Number(form.family_mems) || 0,
+
+        // Make sure water allotments are sent as numbers (allow decimals)
+        quant_water_alloted_per_day:
+          form.quant_water_alloted_per_day === "" ? null : Number(form.quant_water_alloted_per_day),
+        quant_water_alloted_per_month:
+          form.quant_water_alloted_per_month === "" ? null : Number(form.quant_water_alloted_per_month),
+
+        // read-only fields are intentionally not sent for update (server should keep them)
+        // If your server accepts updating remaining_card_balance or others, add them intentionally here.
+
         remarks: (form.remarks || "").trim(),
       };
-
-      // If you want to include RFID UID in payload for server reference without editing,
-      // include it under a separate field (e.g. rfid_uid_reference) — uncomment if needed:
-      // payload.rfid_uid_reference = form.rfid_uid;
 
       await axios.put(`/api/rfid/${id}`, payload);
       alert("RFID record updated successfully!");
@@ -256,6 +264,8 @@ function EditRfidCard() {
                   onChange={handleChange}
                   style={isReadOnly ? styles.disabledInput : styles.input}
                   disabled={isReadOnly}
+                  // allow decimals for water allotments
+                  step={["quant_water_alloted_per_day", "quant_water_alloted_per_month"].includes(key) ? "0.01" : undefined}
                 />
               </div>
             );
