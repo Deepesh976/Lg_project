@@ -22,7 +22,7 @@ export default function RfidCard() {
   const navigate = useNavigate();
 
   const [records, setRecords] = useState([]);
-  const recordsRef = useRef([]); // keep latest records for async functions
+  const recordsRef = useRef([]);
   const [filteredRecords, setFilteredRecords] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -40,26 +40,20 @@ export default function RfidCard() {
   const isMountedRef = useRef(true);
   const pollIntervalRef = useRef(null);
 
-  // Filter modal state
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const [filterFrom, setFilterFrom] = useState(""); // yyyy-mm-dd
-  const [filterTo, setFilterTo] = useState("");   // yyyy-mm-dd
-  const [activeDateFilter, setActiveDateFilter] = useState(null); // { fromTs, toTs, fromLabel, toLabel } or null
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [activeDateFilter, setActiveDateFilter] = useState(null);
 
-  // Active Cards popup state (client-derived only)
   const [showActivePopup, setShowActivePopup] = useState(false);
-  const [activeCards, setActiveCards] = useState([]); // normalized unique list [{ rfid_uid }]
+  const [activeCards, setActiveCards] = useState([]);
 
-  // Flag: when true the date filter came from external API and we should NOT reapply timestamp filtering
   const [externalFilterActive, setExternalFilterActive] = useState(false);
 
-  // External API base
   const externalApiBase = "https://lgatw.aplp.site/api/v2/atw/stream/active/fetch";
 
-  // ------------------ Helpers for date formatting/parsing ------------------
   const pad2 = (n) => (n < 10 ? "0" + n : String(n));
 
-  /** format timestamp (ms) -> "YYYY-MM-DD" using UTC getters */
   const formatDateYYYYMMDD_UTC = useCallback((ms) => {
     if (ms === null || ms === undefined) return "";
     const d = new Date(Number(ms));
@@ -70,7 +64,6 @@ export default function RfidCard() {
     return `${yyyy}-${mm}-${dd}`;
   }, []);
 
-  /** parse "YYYY-MM-DD" -> UTC start / end ms */
   const parseYMDtoUTCStart = useCallback((ymd) => {
     if (!ymd) return null;
     const parts = String(ymd).split("-");
@@ -88,7 +81,6 @@ export default function RfidCard() {
     return Date.UTC(y, m - 1, d, 23, 59, 59, 999);
   }, []);
 
-  // ------------------ time extraction & sorting ------------------
   const getRecordTime = useCallback((r) => {
     if (!r) return 0;
     const tryDate = (v) => {
@@ -109,8 +101,6 @@ export default function RfidCard() {
     });
   }, [getRecordTime]);
 
-  // central function to compute filteredRecords based on search + date filter
-  // NOTE: if externalFilterActive is true we will not apply dateFilter (server-driven)
   const computeFiltered = useCallback((sourceRecords, searchQ, dateFilter) => {
     let arr = Array.isArray(sourceRecords) ? sourceRecords.slice() : [];
     const q = String(searchQ || "").trim().toLowerCase();
@@ -130,7 +120,6 @@ export default function RfidCard() {
       });
     }
 
-    // apply dateFilter only when it's provided AND we're not in external-filter mode
     if (!externalFilterActive && dateFilter && typeof dateFilter.fromTs === "number" && typeof dateFilter.toTs === "number") {
       arr = arr.filter((r) => {
         const t = getRecordTime(r);
@@ -141,7 +130,6 @@ export default function RfidCard() {
     return sortByLastSeen(arr);
   }, [externalFilterActive, getRecordTime, sortByLastSeen]);
 
-  // ------------------ UID normalization utility ------------------
   const normalizeUid = useCallback((raw) => {
     if (!raw && raw !== 0) return "";
     try {
@@ -149,32 +137,85 @@ export default function RfidCard() {
     } catch (e) { return String(raw || "").trim().toUpperCase(); }
   }, []);
 
-  // ------------------ Determine whether a record actually has activity ------------------
   const recordHasActivity = useCallback((r) => {
     if (!r) return false;
     const t = getRecordTime(r);
     if (t && t > 0) return true;
-    const sc = Number(r.swipe_count || r.swipes || 0);
+    const sc = Number(r.swipe_count || r.swipes || r.swipes_in_range || 0);
     if (!Number.isNaN(sc) && sc > 0) return true;
-    const tl = Number(r.total_litres_consumed || 0);
+    const tl = Number(r.total_litres_consumed || r.totalLitresConsumed || 0);
     if (!Number.isNaN(tl) && tl > 0) return true;
+    const fl = Number(r.filtered_litres ?? r.filteredLitres ?? r.litres_consumed ?? r.litresConsumed ?? r.litres ?? 0);
+    if (!Number.isNaN(fl) && fl > 0) return true;
+    const fs = Number(r.filtered_swipes ?? r.filteredSwipes ?? r.visited_times ?? r.visitedTimes ?? r.swipes ?? 0);
+    if (!Number.isNaN(fs) && fs > 0) return true;
     return false;
   }, [getRecordTime]);
 
-  // ------------------ upsert / remove / fetch ------------------
+  const normalizeIncomingRecord = useCallback((rec, isFilteredView) => {
+    if (!rec || typeof rec !== "object") return rec;
+    const normalized = { ...rec };
+
+    const litresAvailable =
+      normalized.litres_consumed ??
+      normalized.litresConsumed ??
+      normalized.filtered_litres ??
+      normalized.filteredLitres ??
+      normalized.litres ??
+      normalized.total_litres_consumed ??
+      null;
+
+    const swipesAvailable =
+      normalized.visited_times ??
+      normalized.visitedTimes ??
+      normalized.filtered_swipes ??
+      normalized.filteredSwipes ??
+      normalized.swipes_in_range ??
+      normalized.swipes ??
+      normalized.swipe_count ??
+      null;
+
+    if (litresAvailable !== null && litresAvailable !== undefined) {
+      const n = Number(litresAvailable);
+      normalized.litres_consumed = Number.isNaN(n) ? litresAvailable : n;
+    } else {
+      normalized.litres_consumed = normalized.litres_consumed ?? 0;
+    }
+
+    if (swipesAvailable !== null && swipesAvailable !== undefined) {
+      const n2 = Number(swipesAvailable);
+      normalized.visited_times = Number.isNaN(n2) ? swipesAvailable : n2;
+    } else {
+      normalized.visited_times = normalized.visited_times ?? 0;
+    }
+
+    normalized.filtered_litres = normalized.filtered_litres ?? normalized.litres_consumed ?? null;
+    normalized.filtered_swipes = normalized.filtered_swipes ?? normalized.visited_times ?? null;
+
+    if (!isFilteredView) {
+      normalized.visited_times = 0;
+      normalized.filtered_swipes = 0;
+      normalized.litres_consumed = 0;
+      normalized.filtered_litres = 0;
+    }
+
+    return normalized;
+  }, []);
+
   const upsertRecord = useCallback((incoming) => {
     if (!incoming) return;
+    const rec = normalizeIncomingRecord(incoming, externalFilterActive);
     setRecords((prev = []) => {
       const copy = Array.isArray(prev) ? [...prev] : [];
       const idx = copy.findIndex((r) => {
         if (!r) return false;
-        if (incoming._id && r._id && String(r._id) === String(incoming._id)) return true;
-        if (incoming.rfid_uid && r.rfid_uid && String(r.rfid_uid) === String(incoming.rfid_uid)) return true;
-        if (incoming.rfidUid && r.rfid_uid && String(r.rfid_uid) === String(incoming.rfidUid)) return true;
+        if (rec._id && r._id && String(r._id) === String(rec._id)) return true;
+        if (rec.rfid_uid && r.rfid_uid && String(r.rfid_uid) === String(rec.rfid_uid)) return true;
+        if (rec.rfidUid && r.rfid_uid && String(r.rfid_uid) === String(rec.rfidUid)) return true;
         return false;
       });
       if (idx !== -1) copy.splice(idx, 1);
-      copy.unshift(incoming);
+      copy.unshift(rec);
       const newRecords = sortByLastSeen(copy);
       try {
         setFilteredRecords(computeFiltered(newRecords, searchQuery, activeDateFilter));
@@ -184,7 +225,7 @@ export default function RfidCard() {
       setCurrentPage(1);
       return newRecords;
     });
-  }, [sortByLastSeen, computeFiltered, searchQuery, activeDateFilter]);
+  }, [sortByLastSeen, computeFiltered, searchQuery, activeDateFilter, normalizeIncomingRecord, externalFilterActive]);
 
   const removeRecordById = useCallback((id) => {
     if (!id) return;
@@ -195,7 +236,6 @@ export default function RfidCard() {
     setFilteredRecords((prev = []) => (prev || []).filter((r) => String(r._id) !== String(id)));
   }, []);
 
-  // helper to read different response shapes into an array
   const harvestArrayFromResponse = (resData) => {
     if (!resData) return [];
     if (Array.isArray(resData)) return resData;
@@ -210,30 +250,25 @@ export default function RfidCard() {
     return [];
   };
 
-  // keep recordsRef updated with latest records for async functions
   useEffect(() => {
     recordsRef.current = records;
   }, [records]);
 
-  // ------------------ Baseline fetch + polling ------------------
   useEffect(() => {
     isMountedRef.current = true;
-
-    // clear any existing poll
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
 
-    // If a custom date filter is active and is external-driven, don't poll (freeze filtered results)
     if (activeDateFilter && externalFilterActive) {
-      // fetch once to ensure we have a local snapshot (safe)
       (async () => {
         try {
           setLoading(true);
           const res = await axios.get('/api/rfid', { timeout: 15000 });
-          const data = harvestArrayFromResponse(res.data);
-          const sorted = sortByLastSeen(data);
+          const raw = harvestArrayFromResponse(res.data);
+          const normalizedList = (raw || []).map(r => normalizeIncomingRecord(r, true));
+          const sorted = sortByLastSeen(normalizedList);
           if (isMountedRef.current) {
             if (!recordsRef.current || recordsRef.current.length === 0) {
               setRecords(sorted);
@@ -249,13 +284,13 @@ export default function RfidCard() {
       return () => { isMountedRef.current = false; };
     }
 
-    // normal behavior: fetch immediately and start polling
     const fetchRecords = async () => {
       try {
         setLoading(true);
         const res = await axios.get('/api/rfid', { timeout: 15000 });
-        const data = harvestArrayFromResponse(res.data);
-        const sorted = sortByLastSeen(data);
+        const raw = harvestArrayFromResponse(res.data);
+        const normalizedIncoming = (raw || []).map(r => normalizeIncomingRecord(r, externalFilterActive));
+        const sorted = sortByLastSeen(normalizedIncoming);
         if (isMountedRef.current) {
           setRecords(sorted);
           setFilteredRecords(computeFiltered(sorted, searchQuery, activeDateFilter));
@@ -276,9 +311,8 @@ export default function RfidCard() {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     };
-  }, [sortByLastSeen, computeFiltered, searchQuery, activeDateFilter, externalFilterActive]);
+  }, [sortByLastSeen, computeFiltered, searchQuery, activeDateFilter, externalFilterActive, normalizeIncomingRecord]);
 
-  // update filteredRecords when searchQuery or records change (debounced)
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchDebounceRef.current = setTimeout(() => {
@@ -290,7 +324,6 @@ export default function RfidCard() {
     };
   }, [searchQuery, records, computeFiltered, activeDateFilter, externalFilterActive]);
 
-  // socket realtime updates
   useEffect(() => {
     let socket = null;
     try {
@@ -325,7 +358,8 @@ export default function RfidCard() {
           const copy = Array.isArray(prev) ? [...prev] : [];
           const idx = copy.findIndex((r) => r && (String(r.rfid_uid) === String(uid) || String(r.rfidUid) === String(uid) || String(r._id) === String(uid)));
           if (idx !== -1) {
-            const item = { ...copy[idx], lastSeen: payload.lastSeen || payload.last_seen || new Date().toISOString(), last_seen: payload.lastSeen || payload.last_seen || new Date().toISOString() };
+            const merged = { ...copy[idx], ...payload };
+            const item = normalizeIncomingRecord(merged, externalFilterActive);
             copy.splice(idx, 1);
             copy.unshift(item);
             const newSorted = sortByLastSeen(copy);
@@ -353,11 +387,8 @@ export default function RfidCard() {
       } catch (e) { /* ignore */ }
       socketRef.current = null;
     };
-  }, [upsertRecord, removeRecordById, sortByLastSeen, computeFiltered, searchQuery, activeDateFilter, externalFilterActive]);
+  }, [upsertRecord, removeRecordById, sortByLastSeen, computeFiltered, searchQuery, activeDateFilter, externalFilterActive, normalizeIncomingRecord]);
 
-  // ------------------ New: fetch external IDs then filter existing 'records' and present result ------------------
-
-  // fetch only IDs (external returns { response: [ { _id: '...' }, ... ] })
   const fetchExternalIds = async (fromYmd, toYmd) => {
     const fromParam = fromYmd || "";
     const toParam = toYmd || "";
@@ -367,46 +398,37 @@ export default function RfidCard() {
       const res = await axios.get(url, { timeout: 20000 });
       const arr = harvestArrayFromResponse(res.data);
       const ids = (arr || []).map((o) => normalizeUid(o && (o._id || o.rfid_uid || o.uid || ""))).filter(Boolean);
-      return ids;
+      return { ids, raw: arr || [] };
     } catch (err) {
       console.error("External IDs fetch failed:", err);
-      return [];
+      return { ids: [], raw: [] };
     } finally {
       setLoading(false);
     }
   };
 
-  // Apply date filter: will call the external API (get ids), then FILTER the already-fetched records (recordsRef.current)
   const applyDateFilterFromInputs = async () => {
-    // If both empty -> clear the filter (same behavior as Clear)
     if (!filterFrom && !filterTo) {
       clearDateFilter();
       return;
     }
 
-    // compute ts labels for UI pill (UTC)
     const fromTs = filterFrom ? parseYMDtoUTCStart(filterFrom) : -8640000000000000;
     const toTs = filterTo ? parseYMDtoUTCEnd(filterTo) : 8640000000000000;
-    const fromLabel = filterFrom || ""; // already YYYY-MM-DD
+    const fromLabel = filterFrom || "";
     const toLabel = filterTo || "";
     setActiveDateFilter({ fromTs, toTs, fromLabel, toLabel });
 
-    // Mark this filter as external-driven so computeFiltered will not re-apply timestamp filtering
     setExternalFilterActive(true);
 
-    // ensure poll is stopped immediately to avoid later overwrites
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
 
     try {
-      // 1. fetch list of ids from external service
-      const idList = await fetchExternalIds(filterFrom || "", filterTo || "");
-      console.log("applyDateFilterFromInputs - external ids count:", idList.length, idList.slice(0,20));
-
+      const { ids: idList, raw: rawItems } = await fetchExternalIds(filterFrom || "", filterTo || "");
       if (!Array.isArray(idList) || idList.length === 0) {
-        // no ids -> clear the table & popup and show empty state
         setRecords([]);
         setFilteredRecords([]);
         setActiveCards([]);
@@ -416,9 +438,7 @@ export default function RfidCard() {
         return;
       }
 
-      // 2. FILTER existing local 'records' (use recordsRef.current) by these ids
       const localArr = Array.isArray(recordsRef.current) ? recordsRef.current.slice() : [];
-      // Build normalized map (fast lookup) from localArr
       const localMapByUid = new Map();
       localArr.forEach((r) => {
         const keys = [
@@ -430,32 +450,68 @@ export default function RfidCard() {
         });
       });
 
+      const metricsMap = new Map();
+      rawItems.forEach((item) => {
+        const key = normalizeUid(item._id || item.rfid_uid || item.uid || item.id || "");
+        if (!key) return;
+        const litresRaw =
+          item.litres_consumed ??
+          item.litresConsumed ??
+          item.filtered_litres ??
+          item.filteredLitres ??
+          item.litres ??
+          item.total_litres_consumed ??
+          null;
+        const swipesRaw =
+          item.visited_times ??
+          item.visitedTimes ??
+          item.filtered_swipes ??
+          item.filteredSwipes ??
+          item.swipes_in_range ??
+          item.swipes ??
+          item.swipe_count ??
+          null;
+
+        const litres = litresRaw === null || litresRaw === undefined ? null : Number(litresRaw);
+        const swipes = swipesRaw === null || swipesRaw === undefined ? null : Number(swipesRaw);
+
+        metricsMap.set(key, { litres, swipes });
+      });
+
       const matched = [];
       const missing = [];
       idList.forEach((ext) => {
-        if (localMapByUid.has(ext)) matched.push(localMapByUid.get(ext));
-        else missing.push(ext);
+        if (localMapByUid.has(ext)) {
+          const localRec = { ...localMapByUid.get(ext) };
+          const m = metricsMap.get(ext);
+          if (m) {
+            if (m.litres !== undefined && m.litres !== null) localRec.filtered_litres = m.litres;
+            if (m.swipes !== undefined && m.swipes !== null) localRec.filtered_swipes = m.swipes;
+            if (typeof m.litres === "number") {
+              if (localRec.litres_consumed === undefined || localRec.litres_consumed === null) {
+                localRec.litres_consumed = m.litres;
+              }
+            }
+            if (typeof m.swipes === "number") {
+              if (localRec.visited_times === undefined || localRec.visited_times === null) {
+                localRec.visited_times = m.swipes;
+              }
+            }
+          }
+          const normalizedLocalRec = normalizeIncomingRecord(localRec, true);
+          matched.push(normalizedLocalRec);
+        } else missing.push(ext);
       });
 
-      console.log("applyDateFilterFromInputs - matched local count:", matched.length);
-      if (missing.length) console.log("applyDateFilterFromInputs - missing external ids (no local record):", missing.slice(0,50));
-
       const sorted = sortByLastSeen(matched || []);
-      // set the main records/table to the filtered matched local set
       setRecords(sorted);
 
-      // compute result considering searchQuery (computeFiltered will IGNORE timestamp filter because externalFilterActive === true)
       const computed = computeFiltered(sorted, searchQuery, null);
-      console.log("applyDateFilterFromInputs - computed(with search) count:", computed.length);
-
-      // filteredRecords keep only "active" ones (makes popup consistent)
-      const activeOnly = (computed || []).filter((r) => recordHasActivity(r));
-      console.log("applyDateFilterFromInputs - activeOnly count:", activeOnly.length);
-
-      setFilteredRecords(activeOnly);
+      setFilteredRecords(computed);
       setCurrentPage(1);
 
-      // derive active cards FROM THE SAME 'activeOnly' set so counts match exactly
+      const activeOnly = (computed || []).filter((r) => recordHasActivity(r));
+
       const seen = new Set();
       const arr = [];
       (activeOnly || []).forEach((r) => {
@@ -485,40 +541,36 @@ export default function RfidCard() {
     }
   };
 
-  // Clear date filter: refetch baseline from /api/rfid and reset UI
   const clearDateFilter = async () => {
     setFilterFrom("");
     setFilterTo("");
     setActiveDateFilter(null);
-    setExternalFilterActive(false); // clear flag
+    setExternalFilterActive(false);
     setShowFilterModal(false);
     setActiveCards([]);
     try {
       setLoading(true);
       const res = await axios.get('/api/rfid', { timeout: 15000 });
-      const data = harvestArrayFromResponse(res.data);
-      const sorted = sortByLastSeen(data);
+      const raw = harvestArrayFromResponse(res.data);
+      const normalizedIncoming = (raw || []).map(r => normalizeIncomingRecord(r, false));
+      const sorted = sortByLastSeen(normalizedIncoming);
       setRecords(sorted);
       setFilteredRecords(computeFiltered(sorted, searchQuery, null));
       setCurrentPage(1);
     } catch (err) {
       console.error("Clear filter fetch failed:", err);
-      // fallback: keep whatever we had but clear active filter
-      setFilteredRecords(computeFiltered(recordsRef.current || [], searchQuery, null));
+      const data = (recordsRef.current || []).map((r) => normalizeIncomingRecord(r, false));
+      setFilteredRecords(computeFiltered(data, searchQuery, null));
     } finally {
       setLoading(false);
     }
   };
 
-  // CSV download (respects current search + date filter; exports full filtered set, not just page)
   const handleDownload = async () => {
     let exportRecords = [];
-    // If a date filter is active (externalFilterActive), use the matched + filtered recordsRef.current
     if (externalFilterActive && (filterFrom || filterTo)) {
-      // We can use filteredRecords (current visible set) for CSV to match what user sees
       exportRecords = filteredRecords.slice();
     } else {
-      // use current client-side records and filters
       exportRecords = computeFiltered(recordsRef.current || [], searchQuery, activeDateFilter);
     }
 
@@ -541,6 +593,8 @@ export default function RfidCard() {
       "Water/Month (L)",
       "No of Times Visited",
       "Total Litres Consumed (L)",
+      "No of Liters consumed (Filtered Range)",
+      "No of Swipes Visited (Filtered Range)",
       "Remaining Card Balance",
       "Remarks",
     ];
@@ -561,6 +615,8 @@ export default function RfidCard() {
         r.quant_water_alloted_per_month ?? "",
         r.swipe_count ?? "",
         r.total_litres_consumed ?? "",
+        r.filtered_litres ?? r.filteredLitres ?? r.litres_consumed ?? r.litresConsumed ?? r.litres ?? "",
+        r.filtered_swipes ?? r.filteredSwipes ?? r.visited_times ?? r.visitedTimes ?? r.swipes ?? r.swipe_count ?? "",
         r.remaining_card_balance ?? "",
         `"${(r.remarks || "").replace(/"/g, '""')}"`,
       ];
@@ -570,7 +626,6 @@ export default function RfidCard() {
     const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    // filename with date range when active
     const filename = activeDateFilter && activeDateFilter.fromLabel
       ? `RFID_Users_${activeDateFilter.fromLabel}${activeDateFilter.toLabel ? `_to_${activeDateFilter.toLabel}` : ""}.csv`
       : "RFID_Users.csv";
@@ -670,14 +725,16 @@ export default function RfidCard() {
     "Family Members",
     "Water/Day (L)",
     "Water/Month (L)",
-    "No of Times Visited",
+    "Total number of times visited",
     "Total Litres Consumed (L)",
+    "litres_consumed",
+    "visited_times",
     "Remaining Card Balance",
     "Remarks",
     "Action",
   ];
 
-  // ------------------ CSS (kept inline like before) ------------------
+  // CSS adjustments to expand table and show full data clearly
   const css = `
     .hint-overlay { position: relative; }
     .rfid-hint {
@@ -712,12 +769,14 @@ export default function RfidCard() {
       padding: 0;
     }
 
+    /* MAIN change: allow automatic column widths so cells expand to show content */
     .data-table {
       border-collapse: collapse;
-      width: calc(100% + 8px);
-      table-layout: fixed;
+      width: 100%;
+      table-layout: auto; /* allow columns to size based on content */
       margin: 0;
-      transform: translateX(-7px);
+      transform: none;
+      font-size: 13px; /* slightly larger for readability */
     }
 
     .data-table th {
@@ -726,74 +785,58 @@ export default function RfidCard() {
       text-align: left;
       font-weight: 700;
       border-bottom: 1px solid rgba(0,0,0,0.06);
-      padding: 6px 8px;
+      padding: 10px 12px;
       white-space: normal;
-      font-size: 9px;
-      letter-spacing: 0.2px;
+      font-size: 11px;
+      letter-spacing: 0.4px;
     }
 
     .data-table td {
-      padding: 6px 6px;
+      padding: 10px 12px;
       border-bottom: 1px solid #f2f2f2;
       background: #fff;
-      white-space: normal;
+      white-space: normal; /* allow wrap */
       word-break: break-word;
-      font-size: 10px;
-      color: #333;
-      vertical-align: middle;
+      font-size: 13px;
+      color: #222;
+      vertical-align: top;
+      line-height: 1.25;
     }
 
-    .data-table td { font-size: 9.5px; }
+    /* remove truncation; let content wrap */
+    .truncate { max-width: none; overflow: visible; text-overflow: unset; white-space: normal; }
+
+    /* give important columns reasonable min-widths so they appear readable */
+    .col-serial { min-width: 110px; width: 110px; }
+    .col-uid { min-width: 160px; width: 160px; }
+    .col-name { min-width: 180px; width: 180px; }
+    .col-address { min-width: 220px; width: 220px; }
+    .col-remarks { min-width: 240px; width: 240px; }
+    .col-filtered-litres { min-width: 160px; width: 160px; text-align: center; }
+    .col-filtered-swipes { min-width: 140px; width: 140px; text-align: center; }
+    .col-mobile { min-width: 120px; width: 120px; }
+    .col-family { min-width: 90px; width: 90px; text-align: center; }
 
     .data-table th:first-child,
     .data-table td:first-child {
-      padding-left: 8px;
-      padding-right: 8px;
+      padding-left: 12px;
+      padding-right: 12px;
       text-align: right;
-      width: 42px;
-      max-width: 42px;
-      font-size: 10px;
+      width: 56px;
+      max-width: 56px;
+      font-size: 13px;
     }
-    .col-sno-td { padding-top: 12px; padding-bottom: 12px; }
+    .col-sno-td { padding-top: 14px; padding-bottom: 14px; }
 
     .data-table tr:hover td { background: rgba(142, 36, 170, 0.02); }
 
-    .truncate { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .col-uid { max-width: 140px; }
-    .col-serial { max-width: 100px; }
-    .col-name { max-width: 140px; }
-    .col-mobile { max-width: 100px; }
-    .col-family { max-width: 70px; }
-
-    .data-table th:last-child,
-    .data-table td:last-child {
-      padding-left: 8px;
-      padding-right: 16px;
-      width: 72px;
-      max-width: 72px;
-    }
-    .action-buttons { display: flex; gap: 6px; align-items: center; justify-content: flex-start; }
-    .action-buttons .btn { display: inline-flex; align-items:center; justify-content:center; width:34px; height:34px; padding:0; border-radius:8px; }
+    .action-buttons { display: flex; gap: 8px; align-items: center; justify-content: flex-start; }
+    .action-buttons .btn { display: inline-flex; align-items:center; justify-content:center; width:36px; height:36px; padding:0; border-radius:8px; }
     .action-buttons .btn i { margin:0; font-size:14px; }
 
-    th.col-waterday .th-split,
-    th.col-watermonth .th-split,
-    th.col-totallitres .th-split,
-    th.col-remaining .th-split,
-    th:nth-child(12) .th-split {
-      text-align: left;
-      padding-left: 8px;
-      transform: translateX(-20px);
-      display: inline-block;
-    }
-
-    td.col-waterday, td.col-watermonth, td.col-totallitres, td.col-remaining, td.col-family, td.col-mobile {
-      text-align: center;
-    }
-
     .th-split { display:block; line-height:1.02; text-align:center; }
-    .th-split .top { display:block; font-weight:800; font-size:9px; }
-    .th-split .bottom { display:block; font-weight:700; font-size:8px; opacity:0.95; }
+    .th-split .top { display:block; font-weight:800; font-size:11px; }
+    .th-split .bottom { display:block; font-weight:700; font-size:10px; opacity:0.95; }
 
     .filter-btn {
       display:inline-flex;
@@ -827,7 +870,7 @@ export default function RfidCard() {
     @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
 
     .filter-modal {
-      width: 440px;
+      width: 480px;
       max-width: calc(100% - 32px);
       border-radius: 12px;
       padding: 20px;
@@ -931,27 +974,27 @@ export default function RfidCard() {
     .uid-card:hover{transform:translateY(-4px);box-shadow:0 12px 25px rgba(12,20,60,0.1);}
 
     .pagination-controls { display:flex; gap:12px; align-items:center; justify-content:flex-end; margin-top:12px; flex-wrap:wrap; }
-    .page-btn { background:#fff; border:1px solid #e6eef8; padding:6px 8px; border-radius:8px; cursor:pointer; min-width:36px; text-align:center; font-size:12px; }
+    .page-btn { background:#fff; border:1px solid #e6eef8; padding:8px 10px; border-radius:8px; cursor:pointer; min-width:40px; text-align:center; font-size:13px; }
     .page-btn.active { background:linear-gradient(90deg,#6366f1,#3b82f6); color:#fff; border:0; }
-    .select { padding:6px 8px; border-radius:8px; border:1px solid #e6eef8; font-size:12px; }
+    .select { padding:8px 10px; border-radius:8px; border:1px solid #e6eef8; font-size:13px; }
 
     @media (max-width: 1100px) {
-      .col-address, .col-village, .col-remarks, .col-watermonth, .col-totallitres, .col-family { display: none; }
-      .data-table { transform: translateX(0); width:100%; }
+      /* retain filtered columns visibility, hide some less-essential columns to keep readability */
+      .col-address, .col-village, .col-remarks { display: none; }
+      .data-table { width: 100%; }
+      .col-uid { min-width: 120px; width: 120px; }
+      .col-name { min-width: 140px; width: 140px; }
     }
     @media (max-width: 760px) {
-      .data-table th { font-size: 9px; padding: 5px 6px; }
-      .data-table td { padding: 6px 6px; font-size: 9px; }
-      .truncate { max-width: 90px; }
-      .col-uid { max-width: 100px; }
-      .col-serial { max-width: 80px; }
-      .col-mobile { max-width: 100px; }
-      .data-table { transform: translateX(0); width:100%; }
+      .data-table th { font-size: 10px; padding: 8px 8px; }
+      .data-table td { padding: 8px 8px; font-size: 12px; }
+      .col-serial { min-width: 90px; width: 90px; }
+      .col-uid { min-width: 110px; width: 110px; }
+      .col-mobile { min-width: 100px; width: 100px; }
       .filter-modal { width: 92%; padding: 14px; }
     }
   `;
 
-  // ------------------ JSX ------------------
   return (
     <>
       <style>{css}</style>
@@ -1059,9 +1102,13 @@ export default function RfidCard() {
                       <th className="col-waterday"><div className="th-split"><span className="top">Water/Day</span><span className="bottom">(L)</span></div></th>
                       <th className="col-watermonth"><div className="th-split"><span className="top">Water/Month</span><span className="bottom">(L)</span></div></th>
 
-                      <th><div className="th-split"><span className="top">No of Times</span><span className="bottom">Visited since</span><span className="bottom">Registered</span></div></th>
+                      <th><div className="th-split"><span className="top">Total number of</span><span className="bottom">times visited</span></div></th>
 
-                      <th className="col-totallitres"><div className="th-split"><span className="top">Total Litres</span><span className="bottom">Consumed (L)</span><span className="bottom">Since</span><span className="bottom">Registered</span></div></th>
+                      <th className="col-totallitres"><div className="th-split"><span className="top">Total Litres</span><span className="bottom">Consumed (L)</span></div></th>
+
+                      <th className="col-filtered-litres"><div className="th-split"><span className="top">litres_consumed</span><span className="bottom">(filtered range)</span></div></th>
+                      <th className="col-filtered-swipes"><div className="th-split"><span className="top">visited_times</span><span className="bottom">(filtered range)</span></div></th>
+
                       <th className="col-remaining"><div className="th-split"><span className="top">Remaining</span><span className="bottom">Card Balance</span></div></th>
                       <th className="col-remarks"><div className="th-split"><span className="top">Remarks</span></div></th>
                       <th><div className="th-split"><span className="top"></span></div></th>
@@ -1119,9 +1166,13 @@ export default function RfidCard() {
                           <td className="truncate col-waterday">{r.quant_water_alloted_per_day ?? "—"}</td>
                           <td className="truncate col-watermonth">{r.quant_water_alloted_per_month ?? "—"}</td>
 
-                          <td className="truncate">{r.swipe_count ?? "—"}</td>
+                          <td className="truncate">{ (r.visited_times !== undefined && r.visited_times !== null) ? r.visited_times : (r.swipe_count ?? "—") }</td>
 
                           <td className="truncate col-totallitres">{r.total_litres_consumed ?? "—"}</td>
+
+                          <td className="truncate col-filtered-litres">{(r.filtered_litres ?? r.filteredLitres ?? r.litres_consumed ?? r.litresConsumed ?? 0)}</td>
+                          <td className="truncate col-filtered-swipes">{(r.filtered_swipes ?? r.filteredSwipes ?? r.visited_times ?? r.visitedTimes ?? r.swipes ?? r.swipe_count ?? 0)}</td>
+
                           <td className="truncate col-remaining">{r.remaining_card_balance ?? "—"}</td>
                           <td className="truncate col-remarks">{r.remarks || "—"}</td>
                           <td>
@@ -1207,7 +1258,6 @@ export default function RfidCard() {
         </div>
       </div>
 
-      {/* Filter Modal */}
       {showFilterModal && (
         <div className="filter-modal-overlay" onClick={() => setShowFilterModal(false)} role="presentation">
           <div className="filter-modal" onClick={(e) => e.stopPropagation()}>
@@ -1232,7 +1282,6 @@ export default function RfidCard() {
         </div>
       )}
 
-      {/* Active Cards Popup (client-derived only) */}
       {showActivePopup && (
         <div className="active-popup-overlay" onClick={() => setShowActivePopup(false)} role="presentation">
           <div className="active-popup" onClick={(e) => e.stopPropagation()}>

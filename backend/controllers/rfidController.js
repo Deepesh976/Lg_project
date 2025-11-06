@@ -383,8 +383,10 @@ exports.getRfidByUid = async (req, res) => {
 /**
  * New endpoint:
  * GET /api/rfid/active?from=YYYY-MM-DD&to=YYYY-MM-DD
- * - runs aggregation on `live_rfid_transactions` to find distinct metadata.rfid_uid values in the range
- * - returns matching Rfid documents as { items: [...], total: n }
+ * - aggregates `live_rfid_transactions` to compute per-UID metrics in the range:
+ *   - litres_consumed: sum of `litres_consumed` (or `litres`) where available (fallback 0)
+ *   - visited_times: count of transactions for that uid in range
+ * - returns shape compatible with your frontend's expectation: { response: [ { _id: '<UID>', litres_consumed, visited_times }, ... ] }
  */
 exports.getActiveRfidsInRange = async (req, res) => {
   try {
@@ -413,35 +415,81 @@ exports.getActiveRfidsInRange = async (req, res) => {
     const lte = toDate ? new Date(new Date(toDate).setHours(23,59,59,999)) : maxTs;
 
     // Validate
-    if (from && !(gte instanceof Date) || to && !(lte instanceof Date)) {
+    if ((from && !(gte instanceof Date)) || (to && !(lte instanceof Date))) {
       return res.status(400).json({ message: "Invalid 'from' or 'to' date. Use a supported date format (YYYY-MM-DD, DD/MM/YYYY, ISO, etc)." });
     }
 
     // use native collection for aggregation
     const coll = mongoose.connection.db.collection('live_rfid_transactions');
 
+    // pipeline: filter by timestamp, ensure metadata.rfid_uid exists, group by metadata.rfid_uid,
+    // compute visited_times (count) and litres_consumed (sum of possible fields - we use ifNull fallback)
     const pipeline = [
       { $match: { timestamp: { $gte: gte, $lte: lte } } },
-      { $group: { _id: '$metadata.rfid_uid' } },
-      { $match: { _id: { $ne: null } } },
-      { $project: { rfid_uid: '$_id', _id: 0 } }
+      // ensure metadata.rfid_uid exists (not null/undefined/empty)
+      { $match: { 'metadata.rfid_uid': { $exists: true, $ne: null } } },
+      {
+        $group: {
+          _id: '$metadata.rfid_uid',
+          // try to sum the most common field names; if absent treat as 0
+          litres_consumed: {
+            $sum: {
+              $cond: [
+                { $ifNull: ['$litres_consumed', false] },
+                '$litres_consumed',
+                {
+                  $cond: [
+                    { $ifNull: ['$litres', false] },
+                    '$litres',
+                    0
+                  ]
+                }
+              ]
+            }
+          },
+          visited_times: { $sum: 1 }
+        }
+      },
+      // project to expected shape (coerce to numbers where possible)
+      {
+        $project: {
+          _id: '$_id',
+          litres_consumed: {
+            $cond: [
+              { $ifNull: ['$litres_consumed', false] },
+              '$litres_consumed',
+              0
+            ]
+          },
+          visited_times: 1
+        }
+      }
     ];
 
     const aggRes = await coll.aggregate(pipeline).toArray();
-    const uids = aggRes.map(d => d.rfid_uid).filter(Boolean);
 
-    if (!uids || uids.length === 0) {
-      return res.status(200).json({ items: [], total: 0 });
+    // Normalize results: ensure string _id and numeric metrics
+    const normalized = (aggRes || []).map((d) => {
+      const uid = d && d._id ? String(d._id) : null;
+      if (!uid) return null;
+      const litresRaw = d.litres_consumed === undefined || d.litres_consumed === null ? 0 : d.litres_consumed;
+      const visitsRaw = d.visited_times === undefined || d.visited_times === null ? 0 : d.visited_times;
+      const litresNum = Number(litresRaw) || 0;
+      const visitsNum = Number(visitsRaw) || 0;
+      return {
+        _id: uid,
+        litres_consumed: litresNum,
+        visited_times: visitsNum
+      };
+    }).filter(Boolean);
+
+    // If no data, return empty response array (frontend expects array under some top-level key)
+    if (!normalized || normalized.length === 0) {
+      return res.status(200).json({ response: [] });
     }
 
-    // find matching user records
-    const users = await Rfid.find({ rfid_uid: { $in: uids } }).lean().exec();
-
-    // order results to follow the uids order (keep only found docs)
-    const userByUid = new Map(users.map(u => [String(u.rfid_uid), u]));
-    const ordered = uids.map(uid => userByUid.get(String(uid))).filter(Boolean);
-
-    return res.status(200).json({ items: ordered, total: ordered.length });
+    // Return shape matching front-end's earlier expectation: response: [ { _id, litres_consumed, visited_times }, ... ]
+    return res.status(200).json({ response: normalized });
   } catch (err) {
     console.error('getActiveRfidsInRange error:', err);
     return res.status(500).json({ message: 'Server error', error: err.message });

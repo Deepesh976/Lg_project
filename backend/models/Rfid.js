@@ -14,18 +14,24 @@ const RfidSchema = new mongoose.Schema(
     aadhar_no: { type: String, default: '', trim: true },
     mobile_no: { type: String, required: true, trim: true },
 
-    // Allocation & usage
+    // Allocation & usage (legacy fields)
     family_mems: { type: Number, default: 1, min: 0 },
     quant_water_alloted_per_day: { type: Number, default: 0, min: 0 },
     quant_water_alloted_per_month: { type: Number, default: 0, min: 0 },
-    swipe_count: { type: Number, default: 0, min: 0 },
-    total_litres_consumed: { type: Number, default: 0, min: 0 },
+    swipe_count: { type: Number, default: 0, min: 0 },                // legacy total swipes
+    total_litres_consumed: { type: Number, default: 0, min: 0 },       // legacy total litres
+
+    // NEW fields: per-range / external metrics (added as numeric fields)
+    // These are useful to store aggregated values returned by the external service.
+    litres_consumed: { type: Number, default: 0, min: 0 },   // e.g. sum of litres for a filtered range (or last sync)
+    visited_times: { type: Number, default: 0, min: 0 },     // e.g. number of visits in filtered range (or last sync)
 
     // Remaining card balance
     remaining_card_balance: { type: Number, default: 0, min: 0 },
 
-    // New field 👇
+    // Last-seen timestamps (both snake_case and camelCase for compatibility)
     last_seen: { type: Date, default: null, index: true },
+    lastSeen: { type: Date, default: null, index: true },
 
     // Extras
     remarks: { type: String, default: '', trim: true }
@@ -33,5 +39,5 @@ const RfidSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Export model named "Rfid" and use collection "rfids"
+// export model named "Rfid" and use collection "rfids"
 module.exports = mongoose.models.Rfid || mongoose.model('Rfid', RfidSchema, 'rfids');
