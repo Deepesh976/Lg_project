@@ -1166,7 +1166,7 @@ export default function RfidCard() {
                           <td className="truncate col-waterday">{r.quant_water_alloted_per_day ?? "—"}</td>
                           <td className="truncate col-watermonth">{r.quant_water_alloted_per_month ?? "—"}</td>
 
-                          <td className="truncate">{ (r.visited_times !== undefined && r.visited_times !== null) ? r.visited_times : (r.swipe_count ?? "—") }</td>
+                          <td className="truncate">{ r.swipe_count ?? "—" }</td>
 
                           <td className="truncate col-totallitres">{r.total_litres_consumed ?? "—"}</td>
 
